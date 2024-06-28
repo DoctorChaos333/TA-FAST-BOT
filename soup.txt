@@ -1,0 +1,85 @@
+<div class="mobileconf_trade_area">
+
+   <div class="mobileconf_trade_partner_info">
+
+<div class="trade_partner_header responsive_trade_offersection top">
+	<div class="trade_partner_headline">
+					Trading with:&nbsp;
+			<span class="trade_partner_headline_sub"><a href="https://steamcommunity.com/profiles/76561199081494335" data-miniprofile="1121228607">SINGLE DRAFT TradeBack.io</a></span>&nbsp;
+					</div>
+
+	<div class="trade_partner_info_block">
+						<div class="trade_partner_icon"><img src="https://community.akamai.steamstatic.com/public/images/skin_1/comment_friendindicator_small.png"></div>
+								You've been friends since				<div class="trade_partner_info_text">
+				13 August, 2020				</div>
+										<div style="clear: left"></div>
+	</div>
+
+			<div class="trade_partner_info_block">
+			<div class="trade_partner_steam_level">
+				<div class="friendPlayerLevel lvl_0"><span class="friendPlayerLevelNum">4</span></div>			</div>
+			<div class="trade_partner_inline_hack">
+				<div class="trade_partner_steam_level_desc trade_partner_info_text">
+					<a href="https://steamcommunity.com/profiles/76561199081494335" data-miniprofile="1121228607">SINGLE DRAFT TradeBack.io</a>				</div>
+				<div class="trade_partner_info_text">
+					has a Steam Level of 4				</div>
+			</div>
+		</div>
+
+					<div class="trade_partner_info_block limited">
+								<div class="trade_partner_icon years_of_service"><img src="https://community.akamai.steamstatic.com/public/images/badges/02_years/steamyears3_54.png" alt=""></div>
+								<div class="trade_partner_member trade_partner_info_text"><a href="https://steamcommunity.com/profiles/76561199081494335" data-miniprofile="1121228607">SINGLE DRAFT TradeBack.io</a> has been on Steam since</div>
+				<div class="trade_partner_member_since trade_partner_info_text ">10 August, 2020</div>
+				<div style="clear: left"></div>
+			</div>
+
+
+	<div style="clear: left"></div>
+</div>   </div>
+
+	<div class="tradeoffer" id="tradeofferid_6522991899" >
+		<div class="tradeoffer_items_ctn  active">
+			<div class="tradeoffer_items primary">
+				<div class="tradeoffer_items_avatar_ctn">
+					<div class="tradeoffer_avatar playerAvatar tiny offline" >
+						<img src="https://avatars.akamai.steamstatic.com/4c763343a921b1e65cf2d552d199c89fcec450af.jpg">
+					</div>
+				</div>
+				<div class="tradeoffer_items_header">
+					You offered:				</div>
+
+
+				<div class="tradeoffer_item_list">
+											<div class="trade_item " style="" data-economy-item="classinfo/753/2122765541/246376127">
+														<img src="https://community.akamai.steamstatic.com/economy/image/IzMF03bk9WpSBq-S-ekoE33L-iLqGFHVaU25ZzQNQcXdA3g5gMEPvUZZEfSMJ6dESN8p_2SVTY7V2NwIwHUPmChCIzb02ClLbOB-O86N5ADopPCZWn36aTDBciCOHVo-S7FePD2IqGKn5O-WFmyfQe54RQwGfPAGoDVLP5jfOxNrgYcVu2u_0UZyDBItYPpPfQ68zylLNLwmzHNBdZhTmSz0JMHc0FxqOUNsXOrgVr2TbtX0mH4lWUxvTqUSesvL7zOq9ZVifznR2Q/96fx96f" srcset="https://community.akamai.steamstatic.com/economy/image/IzMF03bk9WpSBq-S-ekoE33L-iLqGFHVaU25ZzQNQcXdA3g5gMEPvUZZEfSMJ6dESN8p_2SVTY7V2NwIwHUPmChCIzb02ClLbOB-O86N5ADopPCZWn36aTDBciCOHVo-S7FePD2IqGKn5O-WFmyfQe54RQwGfPAGoDVLP5jfOxNrgYcVu2u_0UZyDBItYPpPfQ68zylLNLwmzHNBdZhTmSz0JMHc0FxqOUNsXOrgVr2TbtX0mH4lWUxvTqUSesvL7zOq9ZVifznR2Q/96fx96f 1x, https://community.akamai.steamstatic.com/economy/image/IzMF03bk9WpSBq-S-ekoE33L-iLqGFHVaU25ZzQNQcXdA3g5gMEPvUZZEfSMJ6dESN8p_2SVTY7V2NwIwHUPmChCIzb02ClLbOB-O86N5ADopPCZWn36aTDBciCOHVo-S7FePD2IqGKn5O-WFmyfQe54RQwGfPAGoDVLP5jfOxNrgYcVu2u_0UZyDBItYPpPfQ68zylLNLwmzHNBdZhTmSz0JMHc0FxqOUNsXOrgVr2TbtX0mH4lWUxvTqUSesvL7zOq9ZVifznR2Q/96fx96fdpx2x 2x">
+													</div>
+										<div style="clear: left;"></div>
+				</div>
+			</div>
+
+							<div class="tradeoffer_items_rule"></div>
+
+			<div class="tradeoffer_items secondary">
+				<div class="tradeoffer_items_avatar_ctn">
+					<a class="tradeoffer_avatar playerAvatar tiny offline" href="https://steamcommunity.com/profiles/76561199081494335" data-miniprofile="1121228607">
+						<img src="https://avatars.akamai.steamstatic.com/6d1e46abc29dff6a1ccae5d5e76c1c27332f3db3.jpg">
+					</a>
+				</div>
+				<div class="tradeoffer_items_header">
+					For SINGLE DRAFT TradeBack.io's:				</div>
+
+
+				<div class="tradeoffer_item_list">
+											<div class="trade_item " style="border-color: #D2D2D2; " data-economy-item="classinfo/730/5189384637/302028390">
+														<img src="https://community.akamai.steamstatic.com/economy/image/-9a81dlWLwJ2UUGcVs_nsVtzdOEdtWwKGZZLQHTxDZ7I56KU0Zwwo4NUX4oFJZEHLbXU5A1PIYQNqhpOSV-fRPasw8rsUFJ5KBFZv668FFQynaHMJT9B74-ywtjYxfOmMe_Vx28AucQj3brAoYrz3Fay_kY4MG_wdYeLMlhpLMaM-1U/73fx73f" srcset="https://community.akamai.steamstatic.com/economy/image/-9a81dlWLwJ2UUGcVs_nsVtzdOEdtWwKGZZLQHTxDZ7I56KU0Zwwo4NUX4oFJZEHLbXU5A1PIYQNqhpOSV-fRPasw8rsUFJ5KBFZv668FFQynaHMJT9B74-ywtjYxfOmMe_Vx28AucQj3brAoYrz3Fay_kY4MG_wdYeLMlhpLMaM-1U/73fx73f 1x, https://community.akamai.steamstatic.com/economy/image/-9a81dlWLwJ2UUGcVs_nsVtzdOEdtWwKGZZLQHTxDZ7I56KU0Zwwo4NUX4oFJZEHLbXU5A1PIYQNqhpOSV-fRPasw8rsUFJ5KBFZv668FFQynaHMJT9B74-ywtjYxfOmMe_Vx28AucQj3brAoYrz3Fay_kY4MG_wdYeLMlhpLMaM-1U/73fx73fdpx2x 2x">
+													</div>
+										<div style="clear: left;"></div>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<div style="padding: 10px; color: #7A7A7A; text-align: center">
+		If you did not create this trade, please cancel the trade immediately.  Your account or computer may have been compromised.	</div>
+
+   <div style="width: 1px; height: 66px"></div>
