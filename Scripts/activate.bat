@@ -1,6 +1,6 @@
 @echo off
 
-set "VIRTUAL_ENV=C:\Reactor"
+set "VIRTUAL_ENV=C:\TA FAST BOT"
 
 if defined _OLD_VIRTUAL_PROMPT (
     set "PROMPT=%_OLD_VIRTUAL_PROMPT%"
