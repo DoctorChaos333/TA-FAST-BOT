@@ -3,6 +3,8 @@ import datetime
 import json
 import math
 import random
+import sys
+
 from aiocfscrape import CloudflareScraper
 import re
 import time
@@ -104,11 +106,8 @@ api_key = 'D3D00BF26E986C73B046D5AECC405129'
 username = 'heatherruiz0m'
 password = 'iRCkt89MGwDJG9xuu2hZR6'
 
-bot = Bot(steam_data)
-client = bot.steam_login()
+steam_bot = Bot(steam_data)
 
-print(type(client._session))
-cookies = client._session.cookies
 
 
 class Element:
@@ -179,7 +178,9 @@ class FastBot:
                 Element('http://' + line.strip().split(':')[2] + ':' + line.strip().split(':')[3] + '@' +
                         line.strip().split(':')[
                             0] + ':' + line.strip().split(':')[1]) for line in file.readlines()]
-        print(self.proxies)
+
+        self.responses = {proxy.element: [] for proxy in self.proxies}
+        self.ts = []
 
         self.available_proxies = []
         self.links = []
@@ -211,7 +212,6 @@ class FastBot:
                 assets = json.loads(assets_line.group(1))[appid]['2']
                 # print('ОШШИБКА', json.loads(assets_line.group(1))[appid])
             else:
-                print(1)
                 return {}
 
             listing_info_line = re.search(r'var g_rgListingInfo = (.+);', item_text)
@@ -221,6 +221,7 @@ class FastBot:
         except:
             print('\nНет лотов')
             return {}
+
 
         history_line = re.search(r'var line1=(.+);', item_text)
         if history_line:
@@ -310,7 +311,7 @@ class FastBot:
             'count': 100
         }
 
-        t1 = idx * random.randint(3500, 4000) / 1000 + (idx // 15) * 70
+        t1 = idx * random.randint(3700, 3800) / 1000 + (idx // 15) * 70
         await asyncio.sleep(t1)
 
         info = {
@@ -321,16 +322,18 @@ class FastBot:
 
         if self.stop_parsing:
             await asyncio.sleep(120)
-        print(
-            f'\r[{time.time() - self.start_time}] Проверено: {len(self.succeded)} RPS: {round(self.response_counter / (time.time() - self.start_time), 2)}',
-            end='', flush=True)
+
         try:
-            async with session.get(url=url, headers=headers, params=params, proxy=proxy, timeout=15) as response:
-                self.response_counter += 1
-                if self.stop_parsing:
-                    await asyncio.sleep(120)
+            self.responses[proxy].append(round(time.time() - self.start_time, 1))
+            print(
+                f'\r[{datetime.datetime.now()}] Проверено: {len(self.succeded)} RPS: {round(self.response_counter / (time.time() - self.start_time), 2)}',
+                end='', flush=True)
+            async with session.get(url=url, headers=headers, params=params, proxy=proxy, timeout=15, ssl=False) as response:
                 info = {}
                 if response.status == 200:
+                    self.response_counter += 1
+                    #if (self.response_counter % 10) == 0:
+                    #    print(f"{self.response_counter} RPS: {round(self.response_counter / (time.time() - self.start_time), 2)}")
                     item_text = (await response.text()).strip()
                     info = self.get_info_from_text(item_text=item_text, appid=appid)
                     self.stop_parsing = False
@@ -340,13 +343,13 @@ class FastBot:
                 else:
                     print(response.status)
                 if info:
-                    print(f'\r[{time.time() - self.start_time}] Выгружаю в бд...', end='', flush=True)
-
+                    skin_lots = []
+                    #
                     for k, v in info['skins_info'].items():
                         market_actions_link = v['link']
                         buy_id = v['listingid']
                         skin = url_el.element
-                        id=v['assetid']
+                        id_=v['assetid']
                         sticker=v['stickers']
                         default_price = v['default_price']
                         default_price_without_fee = v['default_price_without_fee']
@@ -360,13 +363,24 @@ class FastBot:
 
                         if sticker:
                             for st in sticker:
-                                is_sticker = await db_connection.is_sticker_exists(st)
                                 st_price = 0
-                                if not is_sticker:
+
+                                if st in self.stickers:
+                                    st_price = self.stickers[st]
+                                else:
+                                    #print('В базе нет', st)
                                     await asyncio.sleep(5)
-                                    await self.fetch_item(session, Element(st), proxy, idx, appid, db_connection)
-                                    st_price = await db_connection.fetch_sticker_price(st)
+                                    if (idx // 15) * 70 > 0:
+                                        print('Буду ожидать дополнительно')
+                                    response_from_sticker = await self.fetch_item(session, Element(st), proxy, idx, appid, db_connection)
+
+                                    if st in self.stickers and response_from_sticker['info']:
+                                        st_price = self.stickers[st]
+
                                     st_price = float(st_price)
+
+                                    if st_price:
+                                        self.stickers[st] = st_price
                                     if sticker.count(st) == 2:
                                         sticker_addition_price += (st_price * 0.2)
                                     elif sticker.count(st) == 3:
@@ -374,10 +388,13 @@ class FastBot:
                                     elif sticker.count(st) >= 4:
                                         sticker_addition_price += (st_price * 0.3)
                                     elif sticker.count(st) == 1:
-                                        if st_price > 
+                                        if st_price > 30000:
+                                            sticker_addition_price += (st_price * 0.045)
+                                        elif 10000 < st_price < 30000:
+                                            sticker_addition_price += (st_price * 0.085)
+                                        elif st_price < 10000:
+                                            sticker_addition_price += (st_price * 0.095)
                                 sticker_price.append([st, st_price])
-                            if sticker_addition_price:
-                                print('ХОРОШИЕ СТИКЕРЫ', sticker, sticker_addition_price)
 
                             link_to_found = f"{url}?filter={' '.join(sticker).replace('Sticker | ', '')}"
                             wear = [[st, 0] for st in sticker]
@@ -385,13 +402,30 @@ class FastBot:
 
                         else:
                             link_to_found = url
-                        profit = default_price_without_fee + sticker_addition_price - listing_price
-                        percent = profit / listing_price * 100
+                        profit = round(default_price_without_fee + sticker_addition_price - listing_price, 2)
+                        percent = round(profit / listing_price * 100, 2)
                         ts = datetime.datetime.now()
-                        await db_connection.smth(buy_id, skin, id, listing_price, default_price, steam_without_fee, sticker, link_to_found, ts, wear, sticker_slot, sticker_price, profit, percent)
+                        #print('ЩАС БУДУ ДОБАВЛЯТЬ', (str(buy_id), str(skin), str(id_), str(listing_price), str(default_price), str(steam_without_fee), str(sticker), str(link_to_found), str(ts), str(wear), str(sticker_slot), str(sticker_price), str(profit), str(percent)))
+                        if 'Sticker |' in str(skin) and skin not in self.stickers:
+                            print(f'\r[{datetime.datetime.now()}] Выгружаю стикеры в бд...', end='', flush=True)
+                            await db_connection.add_sticker(skin, default_price, ts)
+                            print(f'\r[{datetime.datetime.now()}] Стикеры выгружены в бд', end='', flush=True)
+                            self.stickers[skin] = default_price
+                        elif 'Sticker |' not in str(skin):
+                            #print('MARKET ACTIONS', market_actions_link)
+                            skin_lots.append((str(buy_id), str(skin), str(id_), str(listing_price), str(default_price),
+                                              str(steam_without_fee), str(sticker), str(link_to_found), str(ts),
+                                              str(wear), str(sticker_slot), str(sticker_price), str(profit),
+                                              str(percent), str(market_actions_link), '1'))
+                    #print('SKIN LOTSSSS', len(skin_lots), skin_lots)
+                    if skin_lots:
+                        print(f'\r[{datetime.datetime.now()}] Выгружаю скины в бд...', end='', flush=True)
+                        await db_connection.smthmany(skin_lots)
+                        print(f'\r[{datetime.datetime.now()}] Скины выгружены в бд', end='', flush=True)
                     if url_el in self.links:
                         self.links.remove(url_el)
                     self.succeded.append(url_el)
+
                 info = {
                     'code': response.status,
                     'info': info,
@@ -423,14 +457,14 @@ class FastBot:
             'X-Sih-Version': '2.0.19'
         }
         async with CloudflareScraper() as session:
-            async with session.get(url=url, headers=headers) as response:
+            async with session.get(url=url, headers=headers, ssl=False) as response:
                 response_json = await response.text()
                 print('Такой вот response прилетает', response.status, response_json)
 
 
     async def parse_items(self, list_of_names: list, appid: str):
         self.currency_converter = await steam_currencies.main()
-        self.start_time = time.time()
+
         self.stop_parsing = False
 
         await self.check_proxy()
@@ -442,6 +476,10 @@ class FastBot:
         while True:
             try:
                 async with async_db.Storage() as db:
+                    self.start_time = time.time()
+                    self.response_counter = 0
+                    self.stickers = await db.fetch_all_stickers()
+
                     if not self.links:
                         break
 
@@ -454,6 +492,7 @@ class FastBot:
                         session.cookie_jar.update_cookies(cookies)
                         tasks = [self.fetch_item(session, link_threads[j][i], self.proxies[j].element, i, db_connection=db) for i in
                                  range(len(link_threads[-1])) for j in range(min(len(self.proxies), len(link_threads)))]
+
                         await asyncio.gather(*tasks)
                     for el in self.links:
                         el.tries -= 1
@@ -475,7 +514,7 @@ class FastBot:
     async def ping_proxy(self, proxy):
         async with aiohttp.ClientSession() as session:
             # print(f'Проверяю прокси {proxy.element}')
-            async with session.get(url='https://steamcommunity.com/', proxy=proxy.element) as response:
+            async with session.get(url='https://steamcommunity.com/', proxy=proxy.element, ssl=False) as response:
                 # print(f'Проверил прокси {proxy.element}')
                 if response.status == 200:
                     return proxy
@@ -485,47 +524,21 @@ class FastBot:
 
 bot = FastBot()
 
-names = ['Sticker | Team Spirit | Katowice 2019', 'AK-47 | Inheritance (Field-Tested)', 'AK-47 | Asiimov (Field-Tested)', 'AK-47 | Redline (Field-Tested)',
-         'AK-47 | Phantom Disruptor (Field-Tested)', 'AWP | Atheris (Field-Tested)', 'M4A4 | Neo-Noir (Field-Tested)',
-         'USP-S | Cortex (Field-Tested)', 'AK-47 | Slate (Minimal Wear)',
-         'Desert Eagle | Trigger Discipline (Minimal Wear)', 'AK-47 | Slate (Well-Worn)',
-         'M4A4 | Desolate Space (Field-Tested)', 'AK-47 | Neon Revolution (Field-Tested)',
-         'AK-47 | Elite Build (Field-Tested)', 'AK-47 | The Empress (Field-Tested)',
-         'AK-47 | Legion of Anubis (Field-Tested)', 'Desert Eagle | Mecha Industries (Field-Tested)',
-         'AWP | Neo-Noir (Field-Tested)', 'AK-47 | Elite Build (Well-Worn)', 'AK-47 | Elite Build (Minimal Wear)',
-         'Desert Eagle | Printstream (Field-Tested)', 'M4A4 | Tooth Fairy (Field-Tested)',
-         'AK-47 | Point Disarray (Field-Tested)', 'AWP | Atheris (Minimal Wear)', 'Glock-18 | Vogue (Field-Tested)',
-         'AK-47 | Frontside Misty (Field-Tested)', 'AWP | Mortis (Field-Tested)', 'AWP | Fever Dream (Field-Tested)',
-         'AK-47 | Phantom Disruptor (Minimal Wear)', 'M4A1-S | Leaded Glass (Field-Tested)',
-         'Desert Eagle | Trigger Discipline (Factory New)', 'USP-S | Cyrex (Field-Tested)',
-         'Glock-18 | Water Elemental (Field-Tested)', 'AWP | Exoskeleton (Field-Tested)', 'AWP | Atheris (Well-Worn)',
-         'USP-S | Flashback (Field-Tested)', 'AWP | Exoskeleton (Well-Worn)', 'UMP-45 | Oscillator (Factory New)',
-         'AK-47 | Emerald Pinstripe (Field-Tested)', 'Desert Eagle | Mecha Industries (Minimal Wear)',
-         'SSG 08 | Acid Fade (Factory New)', 'USP-S | Cortex (Well-Worn)', 'StatTrak™ AK-47 | Slate (Field-Tested)',
-         'M4A1-S | Decimator (Field-Tested)', 'Desert Eagle | Light Rail (Field-Tested)', 'AWP | Mortis (Minimal Wear)',
-         'StatTrak™ AK-47 | Uncharted (Field-Tested)', 'AWP | PAW (Minimal Wear)', 'AK-47 | Rat Rod (Field-Tested)',
-         'M4A4 | Evil Daimyo (Field-Tested)', 'USP-S | Flashback (Minimal Wear)', 'USP-S | Cyrex (Minimal Wear)',
-         'AK-47 | Uncharted (Minimal Wear)', 'AK-47 | Emerald Pinstripe (Well-Worn)',
-         'AK-47 | Legion of Anubis (Minimal Wear)', 'Nova | Windblown (Factory New)', 'AWP | Worm God (Minimal Wear)',
-         'Desert Eagle | Conspiracy (Minimal Wear)', 'USP-S | Cortex (Battle-Scarred)', 'USP-S | Torque (Field-Tested)',
-         'AWP | Exoskeleton (Minimal Wear)', 'AK-47 | Elite Build (Battle-Scarred)',
-         'SG 553 | Anodized Navy (Factory New)', 'M4A1-S | Nightmare (Field-Tested)',
-         'Desert Eagle | Meteorite (Factory New)', 'Tec-9 | Fuel Injector (Field-Tested)',
-         'MP7 | Bloodsport (Field-Tested)', 'CZ75-Auto | Tuxedo (Minimal Wear)', 'AWP | Worm God (Field-Tested)',
-         'M4A1-S | Player Two (Field-Tested)', 'AK-47 | Slate (Factory New)',
-         'Five-SeveN | Silver Quartz (Minimal Wear)', 'M4A4 | Neo-Noir (Battle-Scarred)',
-         'XM1014 | Entombed (Minimal Wear)', 'M4A1-S | Nitro (Field-Tested)', 'MAC-10 | Disco Tech (Field-Tested)',
-         'M4A4 | Evil Daimyo (Minimal Wear)', 'M249 | O.S.I.P.R. (Factory New)', 'M4A4 | The Emperor (Field-Tested)',
-         'M4A1-S | Flashback (Field-Tested)', 'AUG | Chameleon (Field-Tested)',
-         'Glock-18 | Wasteland Rebel (Field-Tested)', 'AWP | PAW (Factory New)', 'Glock-18 | Vogue (Minimal Wear)',
-         'MAC-10 | Button Masher (Minimal Wear)', 'M4A4 | Tooth Fairy (Minimal Wear)',
-         'M4A1-S | Leaded Glass (Minimal Wear)', 'P2000 | Amber Fade (Minimal Wear)',
-         'MP7 | Anodized Navy (Factory New)', 'AK-47 | Emerald Pinstripe (Minimal Wear)', 'AWP | PAW (Field-Tested)',
-         'M4A1-S | VariCamo (Field-Tested)', 'Sawed-Off | Amber Fade (Factory New)',
-         'StatTrak™ M4A4 | Magnesium (Field-Tested)', 'Glock-18 | Candy Apple (Factory New)',
-         'Glock-18 | Water Elemental (Minimal Wear)', 'AWP | Phobos (Minimal Wear)', 'AWP | Pit Viper (Minimal Wear)',
-         'AWP | Atheris (Battle-Scarred)', 'USP-S | Torque (Factory New)', 'USP-S | Cortex (Minimal Wear)']
+with open('baza730.txt', 'r', encoding='utf-8') as file:
+    baza730 = file.read().split('\n')
+with open('floats.txt', 'r', encoding='utf-8') as file:
+    floats = file.read().split('\n')
+names = list(set(baza730 + floats))
+names = ['AWP | Electric Hive (Minimal Wear)']
 
-start = time.time()
-asyncio.run(bot.parse_items(list_of_names=names[:5], appid='730'))
-print(f"\nВсе заняло {time.time() - start} секунд")
+while True:
+    client = steam_bot.steam_login()
+    cookies = client._session.cookies
+    step = len(bot.proxies) * 5
+    for i in range(0, len(names), step):
+        i1 = i
+        i2 = i + step
+        if i2 > len(names):
+            i2 = len(names)
+        start = time.time()
+        asyncio.run(bot.parse_items(list_of_names=names[i1:i2], appid='730'))
