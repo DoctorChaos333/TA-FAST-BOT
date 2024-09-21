@@ -123,6 +123,7 @@ class FastBot:
 
     def __init__(self):
         self.response_counter = 0
+        self.skin_counter = set()
         self.currencies = {
             "2001": "USD",
             "2002": "GBP",
@@ -188,7 +189,7 @@ class FastBot:
         self.headers = {'User-Agent': fake_useragent.UserAgent().chrome}
         self.start_time = time.time()
         self.currency_converter = None
-        self.loop = asyncio.get_event_loop()
+        #self.loop = asyncio.get_event_loop()
 
 
     def convert_name_to_link(self, name: str, appid: str = '730'):
@@ -207,6 +208,7 @@ class FastBot:
         }
 
         assets_line = re.search(r'var g_rgAssets = (.+);', item_text)
+
         try:
             if assets_line and json.loads(assets_line.group(1)):
                 assets = json.loads(assets_line.group(1))[appid]['2']
@@ -232,11 +234,13 @@ class FastBot:
                                                                                   '%b %d %Y %H: +%S').timestamp() < time_])
             data['history'] = history
 
+
         if listing_info_line:
             listing_info = json.loads(listing_info_line.group(1))
             data['skins_info'] = dict()
             default_price = math.inf
             default_price_without_fee = math.inf
+            
             for idx, (listing_id, value) in enumerate(listing_info.items()):
                 if idx > min(len(listing_info), 100):
                     break
@@ -275,11 +279,18 @@ class FastBot:
                         'steam_without_fee': steam_without_fee}
 
                     if sticker_value != ' ':
+
+                        special_stickers = ['Run T,$$$ Run',
+                                            'Run CT,$$$ Run',
+                                            "Don't Worry,$$$ I'm Pro",
+                                            'Hi,$$$ My Game Is',
+                                            'Rock,$$$ Paper,$$$ Scissors']
+                        
                         pattern = r"<br>Sticker: (.+?)<"
                         if re.search(pattern, sticker_value):
-
+                            
                             line = list(re.search(pattern, sticker_value).group(1))
-
+                            
                             count_of_brackets = 1
                             for ch in range(len(line)):
                                 if line[ch] == '(':
@@ -289,15 +300,17 @@ class FastBot:
                                 if count_of_brackets and line[ch] == ',':
                                     line[ch] = ',$$$'
                             if line:
-                                stickers = list(map(lambda name: 'Sticker | ' + name, ''.join(line).split(',$$$ ')))
+                                raw_stickers = ''.join(line)
+                                for sp_st in special_stickers:
+                                    raw_stickers = raw_stickers.replace(sp_st, sp_st.replace('$$$', ''))
+                                stickers = list(map(lambda name: 'Sticker | ' + name, raw_stickers.split(',$$$ ')))
+                    
                                 data['skins_info'][listing_id]['stickers'] = stickers
         return data
 
     async def fetch_item(self, session: aiohttp.ClientSession, url_el: Element, proxy: str, idx: int,
-                         appid: str = '730', db_connection=None):
+                         appid: str = '730', db_connection=None, sticker=False):
         url = self.convert_name_to_link(url_el.element, appid)
-        proxy = proxy
-
         headers = {
             "User-Agent": fake_useragent.UserAgent().random,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
@@ -311,200 +324,257 @@ class FastBot:
             'count': 100
         }
 
-        t1 = idx * random.randint(3700, 3800) / 1000 + (idx // 15) * 70
-        await asyncio.sleep(t1)
+        # Независимая задержка для каждого запроса
+        t1 = random.randint(7900, 8000) / 1000 * (idx // len(self.proxies))
+        await self.delayed_request(session, url, headers, params, proxy, db_connection, t1, url_el, idx, appid)
 
+    async def delayed_request(self, session, url, headers, params, proxy, db_connection, t1, url_el, idx, appid, max_parse=300):
+
+        await asyncio.sleep(t1)  # Задержка перед выполнением запроса
+        #if (self.response_counter / len(self.proxies)) % 15 == 0 and self.response_counter > 0:
+        #    print(
+        #        f'\r[{datetime.datetime.now()}] Перерыв в запросах...',
+        #        end='', flush=True)
+        #    await asyncio.sleep(75)
+
+
+        # Выполнение самого запроса
         info = {
             'code': 429,
             'info': {},
             'url': url
         }
-
-        if self.stop_parsing:
-            await asyncio.sleep(120)
-
+        common_skins_info = dict()
         try:
-            self.responses[proxy].append(round(time.time() - self.start_time, 1))
             print(
-                f'\r[{datetime.datetime.now()}] Проверено: {len(self.succeded)} RPS: {round(self.response_counter / (time.time() - self.start_time), 2)}',
+                f'\r[{datetime.datetime.now()}] Проверено: {len(self.succeded)} Сделано запросов: {self.response_counter} Со стикерами, но без наценки: {len(self.skin_counter)} RPS: {round(self.response_counter / (time.time() - self.start_time), 2)}',
                 end='', flush=True)
-            async with session.get(url=url, headers=headers, params=params, proxy=proxy, timeout=15, ssl=False) as response:
-                info = {}
-                if response.status == 200:
-                    self.response_counter += 1
-                    #if (self.response_counter % 10) == 0:
-                    #    print(f"{self.response_counter} RPS: {round(self.response_counter / (time.time() - self.start_time), 2)}")
-                    item_text = (await response.text()).strip()
-                    info = self.get_info_from_text(item_text=item_text, appid=appid)
-                    self.stop_parsing = False
-                elif response.status == 429:
-                    print(f'[{datetime.datetime.now()}] Слишком много запросов. Пробуем еще раз...')
-                    raise Exception
-                else:
-                    print(response.status)
-                if info:
-                    skin_lots = []
-                    #
-                    for k, v in info['skins_info'].items():
-                        market_actions_link = v['link']
-                        buy_id = v['listingid']
-                        skin = url_el.element
-                        id_=v['assetid']
-                        sticker=v['stickers']
+
+            
+
+            for start in range(0, max_parse, 100):
+                self.response_counter += 1
+                params['start'] = start
+                async with session.get(url=url, headers=headers, params=params, proxy=proxy, ssl=True) as response:
+                    if response.status == 200:
+
+                        # if (self.response_counter % 10) == 0:
+                        #    print(f"{self.response_counter} RPS: {round(self.response_counter / (time.time() - self.start_time), 2)}")
+                        item_text = (await response.text()).strip()
+
+                        info = self.get_info_from_text(item_text=item_text, appid=appid)
+
+                        self.stop_parsing = False
+                    elif response.status == 429:
+                        print(f'[{datetime.datetime.now()}] Слишком много запросов. Пробуем еще раз...',  proxy)
+                        await asyncio.sleep(300)
+                        raise Exception
+                    else:
+                        print('RESPONSE STATUS', response.status)
+
+                    if info:
+                        if len(common_skins_info | info['skins_info']) == len(common_skins_info):
+                            break
+                        else:
+                            common_skins_info |= info['skins_info']
+                            if 0 < len(info['skins_info']) < 100:
+                                break
+                            await asyncio.sleep(8)
+                    else:
+                        break
+
+            info = common_skins_info
+
+            if info:
+                default_price = math.inf
+                default_price_without_fee = math.inf
+                for k, v in info.items():
+                    if v['default_price'] < default_price:
                         default_price = v['default_price']
                         default_price_without_fee = v['default_price_without_fee']
-                        listing_price = v['price']
-                        #(buy_id, skin, id, listing_price, default_price, steam_without_fee, sticker, url) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
-                        steam_without_fee = v['steam_without_fee']
-                        wear = []
-                        sticker_slot = []
-                        sticker_price = []
-                        sticker_addition_price = 0
 
-                        if sticker:
-                            for st in sticker:
-                                st_price = 0
+                skin_lots = []
+                #
+                for k, v in info.items():
+                    market_actions_link = v['link']
+                    buy_id = v['listingid']
+                    
+                    skin = url_el.element
+                    id_ = v['assetid']
+                    sticker = v['stickers']
+                    #default_price = v['default_price']
+                    #default_price_without_fee = v['default_price_without_fee']
+                    listing_price = v['price']
+                    # (buy_id, skin, id, listing_price, default_price, steam_without_fee, sticker, url) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
+                    steam_without_fee = v['steam_without_fee']
+                    wear = []
+                    sticker_slot = []
+                    sticker_price = []
+                    sticker_addition_price = 0
 
-                                if st in self.stickers:
+                    if sticker:
+                        for st in sticker:
+                            st_price = 0
+
+                            if st in self.stickers:
+                                st_price = self.stickers[st]
+                                if sticker.count(st) == 2:
+                                    sticker_addition_price += (st_price * 0.2)
+                                elif sticker.count(st) == 3:
+                                    sticker_addition_price += (st_price * 0.25)
+                                elif sticker.count(st) >= 4:
+                                    sticker_addition_price += (st_price * 0.3)
+                                elif sticker.count(st) == 1:
+                                    
+                                    if st_price > 30000:
+                                        sticker_addition_price += (st_price * 0.045)
+                                    elif 10000 < st_price < 30000:
+                                        sticker_addition_price += (st_price * 0.085)
+                                    elif st_price < 10000:
+                                        sticker_addition_price += (st_price * 0.095)
+                                
+                            else:
+                                # print('В базе нет', st)
+                                await asyncio.sleep(3)
+                                response_from_sticker = await self.delayed_request(session=session,
+                                                                                   url=self.convert_name_to_link(st),
+                                                                                   headers=headers,
+                                                                                   params=params,
+                                                                                   proxy=proxy,
+                                                                                   db_connection=db_connection,
+                                                                                   t1=7,
+                                                                                   url_el=url_el,
+                                                                                   idx=1,
+                                                                                   appid=appid,
+                                                                                   max_parse=100)
+
+                                if st in self.stickers and response_from_sticker['info']:
                                     st_price = self.stickers[st]
-                                else:
-                                    #print('В базе нет', st)
-                                    await asyncio.sleep(5)
-                                    if (idx // 15) * 70 > 0:
-                                        print('Буду ожидать дополнительно')
-                                    response_from_sticker = await self.fetch_item(session, Element(st), proxy, idx, appid, db_connection)
-
-                                    if st in self.stickers and response_from_sticker['info']:
-                                        st_price = self.stickers[st]
-
-                                    st_price = float(st_price)
-
+                                elif response_from_sticker['info']:
+                                    for key in response_from_sticker['info']:
+                                        st_price = response_from_sticker['info'][key]['default_price']
+                                        break
                                     if st_price:
                                         self.stickers[st] = st_price
-                                    if sticker.count(st) == 2:
-                                        sticker_addition_price += (st_price * 0.2)
-                                    elif sticker.count(st) == 3:
-                                        sticker_addition_price += (st_price * 0.25)
-                                    elif sticker.count(st) >= 4:
-                                        sticker_addition_price += (st_price * 0.3)
-                                    elif sticker.count(st) == 1:
-                                        if st_price > 30000:
-                                            sticker_addition_price += (st_price * 0.045)
-                                        elif 10000 < st_price < 30000:
-                                            sticker_addition_price += (st_price * 0.085)
-                                        elif st_price < 10000:
-                                            sticker_addition_price += (st_price * 0.095)
-                                sticker_price.append([st, st_price])
+                                        print(f'\r[{datetime.datetime.now()}] Выгружаю стикеры в бд...', end='',
+                                              flush=True)
+                                        dbt1 = time.time()
+                                        await db_connection.add_sticker(st, st_price, datetime.datetime.now())
+                                        dbt2 = time.time()
+                                        self.start_time += (dbt2 - dbt1) * 1.6
+                                        print(f'\r[{datetime.datetime.now()}] Стикеры выгружены в бд', end='',
+                                              flush=True)
 
-                            link_to_found = f"{url}?filter={' '.join(sticker).replace('Sticker | ', '')}"
-                            wear = [[st, 0] for st in sticker]
-                            sticker_slot = [[sticker[i], i] for i in range(len(sticker))]
+                                st_price = float(st_price)
 
-                        else:
-                            link_to_found = url
-                        profit = round(default_price_without_fee + sticker_addition_price - listing_price, 2)
-                        percent = round(profit / listing_price * 100, 2)
-                        ts = datetime.datetime.now()
-                        #print('ЩАС БУДУ ДОБАВЛЯТЬ', (str(buy_id), str(skin), str(id_), str(listing_price), str(default_price), str(steam_without_fee), str(sticker), str(link_to_found), str(ts), str(wear), str(sticker_slot), str(sticker_price), str(profit), str(percent)))
-                        if 'Sticker |' in str(skin) and skin not in self.stickers:
-                            print(f'\r[{datetime.datetime.now()}] Выгружаю стикеры в бд...', end='', flush=True)
-                            await db_connection.add_sticker(skin, default_price, ts)
-                            print(f'\r[{datetime.datetime.now()}] Стикеры выгружены в бд', end='', flush=True)
-                            self.stickers[skin] = default_price
-                        elif 'Sticker |' not in str(skin):
-                            #print('MARKET ACTIONS', market_actions_link)
+                                if st_price:
+                                    self.stickers[st] = st_price
+                                if sticker.count(st) == 2:
+                                    sticker_addition_price += (st_price * 0.2)
+                                elif sticker.count(st) == 3:
+                                    sticker_addition_price += (st_price * 0.25)
+                                elif sticker.count(st) >= 4:
+                                    sticker_addition_price += (st_price * 0.3)
+                                elif sticker.count(st) == 1:
+                                    
+                                    if st_price > 30000:
+                                        sticker_addition_price += (st_price * 0.045)
+                                    elif 10000 < st_price < 30000:
+                                        sticker_addition_price += (st_price * 0.085)
+                                    elif st_price < 10000:
+                                        sticker_addition_price += (st_price * 0.095)
+                                if not st_price:
+                                    print('Почему-то не нашел цену на стикер', st, skin)
+                            sticker_price.append([st, st_price])
+
+                        link_to_found = f"{url}?filter={' '.join(sticker).replace('Sticker | ', '')}"
+                        wear = [[st, 0] for st in sticker]
+                        sticker_slot = [[sticker[i], i] for i in range(len(sticker))]
+
+                    else:
+                        link_to_found = url
+                    if sticker and sticker_addition_price == 0:
+                        self.skin_counter.add(buy_id)
+                    profit = round(default_price_without_fee + sticker_addition_price - listing_price, 2)
+                    percent = round(profit / listing_price * 100, 2)
+                    ts = datetime.datetime.now()
+                    # print('ЩАС БУДУ ДОБАВЛЯТЬ', (str(buy_id), str(skin), str(id_), str(listing_price), str(default_price), str(steam_without_fee), str(sticker), str(link_to_found), str(ts), str(wear), str(sticker_slot), str(sticker_price), str(profit), str(percent)))
+                    if 'Sticker |' in str(skin) and skin not in self.stickers:
+                        print(f'\r[{datetime.datetime.now()}] Выгружаю стикеры в бд...', end='', flush=True)
+
+                        dbt1 = time.time()
+                        await db_connection.add_sticker(skin, default_price, ts)
+                        dbt2 = time.time()
+                        self.start_time += (dbt2 - dbt1) * 1.6
+                        print(f'\r[{datetime.datetime.now()}] Стикеры выгружены в бд', end='', flush=True)
+                        self.stickers[skin] = default_price
+                    elif 'Sticker |' not in str(skin):
+                        # print('MARKET ACTIONS', market_actions_link)
+                        if (percent > 0 and sticker) or (idx > int(self.len_links * divis) and percent > -30):
                             skin_lots.append((str(buy_id), str(skin), str(id_), str(listing_price), str(default_price),
                                               str(steam_without_fee), str(sticker), str(link_to_found), str(ts),
                                               str(wear), str(sticker_slot), str(sticker_price), str(profit),
                                               str(percent), str(market_actions_link), '1'))
-                    #print('SKIN LOTSSSS', len(skin_lots), skin_lots)
-                    if skin_lots:
-                        print(f'\r[{datetime.datetime.now()}] Выгружаю скины в бд...', end='', flush=True)
-                        await db_connection.smthmany(skin_lots)
-                        print(f'\r[{datetime.datetime.now()}] Скины выгружены в бд', end='', flush=True)
-                    if url_el in self.links:
-                        self.links.remove(url_el)
-                    self.succeded.append(url_el)
+                # print('SKIN LOTSSSS', len(skin_lots), skin_lots)
+                if skin_lots:
+                    print(f'\r[{datetime.datetime.now()}] Выгружаю скины в бд...', end='', flush=True)
 
-                info = {
-                    'code': response.status,
-                    'info': info,
-                    'url': url
-                }
+                    dbt1 = time.time()
+                    await db_connection.smthmany(skin_lots)
+                    dbt2 = time.time()
+
+                    self.start_time += (dbt2 - dbt1) * 1.6
+                    print(f'\r[{datetime.datetime.now()}] Скины выгружены в бд', end='', flush=True)
+                if url_el in self.links:
+                    self.links.remove(url_el)
+                self.succeded.append(url_el)
+
+            info = {
+                'code': response.status,
+                'info': info,
+                'url': url
+            }
         except:
+
             print(3)
+
             print(traceback.format_exc())
         finally:
             return info
 
-    async def parse_float(self, market_actions_link: str, session, proxy):
-        url = f"https://floats.steaminventoryhelper.com/?url={market_actions_link.replace('%20M%', '%20M').replace('%A%', 'A').replace('%D', 'D')}"
-        #scraper = cloudscraper.create_scraper(browser={'browser': 'firefox','platform': 'windows','mobile': False})
-        headers = {
-            'authority': 'floats.steaminventoryhelper.com',
-            'method': 'GET',
-            'scheme': 'https',
-            'Accept': '*/*',
-            'Accept-encoding': 'gzip, deflate, br, zstd',
-            'Accept-language': 'ru,en;q=0.9,en-GB;q=0.8,en-US;q=0.7',
-            'Cache-control': 'no-cache',
-            'Pragma': 'no-cache',
-            'Priority': 'u=1, i',
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'none',
-            'User-Agent': fake_useragent.UserAgent().random,
-            'X-Sih-Version': '2.0.19'
-        }
-        async with CloudflareScraper() as session:
-            async with session.get(url=url, headers=headers, ssl=False) as response:
-                response_json = await response.text()
-                print('Такой вот response прилетает', response.status, response_json)
-
 
     async def parse_items(self, list_of_names: list, appid: str):
         self.currency_converter = await steam_currencies.main()
+        if self.currency_converter:
+            if self.currency_converter['RUB'] < 1:
+                self.currency_converter = await steam_currencies.main()
+        
+
 
         self.stop_parsing = False
-
         await self.check_proxy()
 
         self.succeded, self.failed = [], []
-
         self.links = [Element(name) for name in list_of_names]
+        self.len_links = int(len(self.links))
 
-        while True:
-            try:
-                async with async_db.Storage() as db:
-                    self.start_time = time.time()
-                    self.response_counter = 0
-                    self.stickers = await db.fetch_all_stickers()
+        async with async_db.Storage() as db:
+            self.start_time = time.time()
+            self.response_counter = 0
+            self.stickers = await db.fetch_all_stickers()
 
-                    if not self.links:
-                        break
+            if not self.links:
+                return
 
-                    link_threads = [[] for _ in range(min(len(self.proxies), len(self.links)))]
-
-                    for i in range(len(self.links)):
-                        link_threads[i % len(link_threads)].append(self.links[i])
-
-                    async with aiohttp.ClientSession() as session:
-                        session.cookie_jar.update_cookies(cookies)
-                        tasks = [self.fetch_item(session, link_threads[j][i], self.proxies[j].element, i, db_connection=db) for i in
-                                 range(len(link_threads[-1])) for j in range(min(len(self.proxies), len(link_threads)))]
-
-                        await asyncio.gather(*tasks)
-                    for el in self.links:
-                        el.tries -= 1
-                        if el.tries < 1:
-                            self.links.remove(el)
-
-            except:
-                print(traceback.format_exc())
-                print('Ожидаю несколько секунд')
-                for s in range(300):
-                    print(f'\rОсталось ждать: {300 - s}', end='', flush=True)
-                    time.sleep(1)
+            # Создаем список задач, распределяя ссылки по потокам
+            tasks = []
+            async with aiohttp.ClientSession() as session:
+                session.cookie_jar.update_cookies(cookies)
+                for idx, link in enumerate(self.links):
+                    proxy = self.proxies[idx % len(self.proxies)].element
+                    tasks.append(asyncio.create_task(self.fetch_item(session, link, proxy, idx, db_connection=db)))
+                # Параллельное выполнение всех запросов
+                await asyncio.gather(*tasks)
 
     async def check_proxy(self):
         proxy_list = self.proxies
@@ -522,23 +592,38 @@ class FastBot:
                     return None
 
 
-bot = FastBot()
 
-with open('baza730.txt', 'r', encoding='utf-8') as file:
-    baza730 = file.read().split('\n')
-with open('floats.txt', 'r', encoding='utf-8') as file:
-    floats = file.read().split('\n')
-names = list(set(baza730 + floats))
-names = ['AWP | Electric Hive (Minimal Wear)']
+
+
+
 
 while True:
-    client = steam_bot.steam_login()
-    cookies = client._session.cookies
-    step = len(bot.proxies) * 5
-    for i in range(0, len(names), step):
-        i1 = i
-        i2 = i + step
-        if i2 > len(names):
-            i2 = len(names)
-        start = time.time()
-        asyncio.run(bot.parse_items(list_of_names=names[i1:i2], appid='730'))
+    try:
+        bot = FastBot()
+        with open('baza730.txt', 'r', encoding='utf-8') as file:
+            baza730 = file.read().split('\n')
+        with open('floats.txt', 'r', encoding='utf-8') as file:
+            floats = file.read().split('\n')
+        names = list(set(baza730 + floats))
+
+        client = steam_bot.steam_login()
+        cookies = client._session.cookies
+        step = len(bot.proxies) * 5
+
+        divis = 0.95
+
+        while baza730:
+            pack_of_names = []
+            for i in range(int(step*divis)):
+                if baza730:
+                    pack_of_names.append(baza730.pop(0))
+            for i in range(int(step - divis * divis)):
+                if floats:
+                    pack_of_names.append(floats.pop(0))
+            start = time.time()
+            asyncio.run(bot.parse_items(list_of_names=pack_of_names, appid='730'))
+            time.sleep(10)
+    except:
+        print(traceback.format_exc())
+    finally:
+        time.sleep(10)
