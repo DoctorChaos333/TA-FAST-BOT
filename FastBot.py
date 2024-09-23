@@ -199,7 +199,7 @@ class FastBot:
         link = f"https://steamcommunity.com/market/listings/{appid}/{url}"
         return link
 
-    def get_info_from_text(self, item_text: str, appid='730', time_=604800) -> dict:
+    def get_info_from_text(self, item_text: str, appid='730', time_=604800, page_num=0) -> dict:
         """Принимает текст страницы, возвращает все данные о нем на ТП"""
 
         data = {
@@ -276,7 +276,8 @@ class FastBot:
                         'link': link,
                         'stickers': [],
                         'item_nameid': item_nameid,
-                        'steam_without_fee': steam_without_fee}
+                        'steam_without_fee': steam_without_fee,
+                        'page_num': page_num}
 
                     if sticker_value != ' ':
 
@@ -362,7 +363,7 @@ class FastBot:
                         #    print(f"{self.response_counter} RPS: {round(self.response_counter / (time.time() - self.start_time), 2)}")
                         item_text = (await response.text()).strip()
 
-                        info = self.get_info_from_text(item_text=item_text, appid=appid)
+                        info = self.get_info_from_text(item_text=item_text, appid=appid, page_num=int(start/100))
 
                         self.stop_parsing = False
                     elif response.status == 429:
@@ -406,6 +407,7 @@ class FastBot:
                     #default_price_without_fee = v['default_price_without_fee']
                     listing_price = v['price']
                     # (buy_id, skin, id, listing_price, default_price, steam_without_fee, sticker, url) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
+                    page_num = v['page_num']
                     steam_without_fee = v['steam_without_fee']
                     wear = []
                     sticker_slot = []
@@ -514,7 +516,7 @@ class FastBot:
                             skin_lots.append((str(buy_id), str(skin), str(id_), str(listing_price), str(default_price),
                                               str(steam_without_fee), str(sticker), str(link_to_found), str(ts),
                                               str(wear), str(sticker_slot), str(sticker_price), str(profit),
-                                              str(percent), str(market_actions_link), '1'))
+                                              str(percent), str(market_actions_link), '1', page_num))
                 # print('SKIN LOTSSSS', len(skin_lots), skin_lots)
                 if skin_lots:
                     print(f'\r[{datetime.datetime.now()}] Выгружаю скины в бд...', end='', flush=True)
