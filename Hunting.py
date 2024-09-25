@@ -227,10 +227,16 @@ class FastBot:
                 amount = int(value['asset']['amount'])
                 market_actions = value['asset'].get('market_actions')
                 asset_id = value['asset']['id']
-                fee = value['converted_fee']
-                price = value['converted_price'] + fee
+                if value.get('converted_fee'):
+                    fee = value['converted_fee']
+                    price = value['converted_price'] + fee
+                    steam_without_fee = value['converted_price']
+                else:
+                    fee = value['fee']
+                    price = value['price'] + fee
+                    steam_without_fee = value['price']
                 #rub_price = round(self.currency_converter['RUB'] * price / self.currency_converter[currencyid] / 100, 2)
-                steam_without_fee = value['converted_price']
+
                 if price < default_price:
                     default_price = price
                     default_price_without_fee = steam_without_fee
@@ -286,11 +292,11 @@ class FastBot:
                                 data['skins_info'][listing_id]['stickers'] = stickers
         return data
 
-    async def fetch_item(self, session: aiohttp.ClientSession, info, proxy: str, idx: int,
+    async def fetch_item(self, info, proxy: str, idx: int,
                          appid: str = '730', db_connection=None, account_id=None):
 
-        session.cookie_jar.update_cookies(self.cookies[info['login']]['cookie'])
-        print(cookies[info['login']]['login'], cookies[info['login']]['currency'])
+        #session.cookie_jar.update_cookies(self.cookies[info['login']]['cookie'])
+        #print(cookies[info['login']]['login'], cookies[info['login']]['currency'])
         skin = info['skin']
         max_percent = info['max_percent_buy']
 
@@ -309,12 +315,12 @@ class FastBot:
         }
 
         # Независимая задержка для каждого запроса
-        t1 = random.randint(10200, 10400) / 1000 * (idx // len(self.hunting_info)) + 0.01
+        t1 = random.randint(12200, 12400) / 1000 * (idx // len(self.hunting_info)) + 0.01
 
-        await self.delayed_request(session=session, url=url, headers=headers, params=params, proxy=proxy, db=db_connection, t1=t1, skin=skin, appid=appid, account_id=account_id, max_percent=max_percent, login=info['login'])
+        await self.delayed_request(url=url, headers=headers, params=params, proxy=proxy, db=db_connection, t1=t1, skin=skin, appid=appid, account_id=account_id, max_percent=max_percent, login=info['login_to_buy'])
 
-    async def delayed_request(self, session, url, headers, params, proxy, db, t1, skin, appid, account_id, max_percent,
-                              max_parse=300, login=''):
+    async def delayed_request(self, url, headers, params, proxy, db, t1, skin, appid, account_id, max_percent,
+                              max_parse=2000, login=''):
 
         await asyncio.sleep(t1)  # Задержка перед выполнением запроса
         # if (self.response_counter / len(self.proxies)) % 15 == 0 and self.response_counter > 0:
@@ -330,88 +336,97 @@ class FastBot:
             'url': url
         }
         common_skins_info = dict()
+        default_price, fee = await db.get_default_price(account_id)
+
+        if type(default_price) == int and type(fee) == int:
+            default_price = default_price
+            default_price_without_fee = default_price - fee
+        else:
+            default_price = math.inf
+            default_price_without_fee = math.inf
+
+        old_info = None
+        info0_counter = 0
+
         try:
-            print(
-                f'\r[{datetime.datetime.now()}] Сделано запросов: {self.response_counter} Со стикерами, но без наценки: {len(self.skin_counter)} RPS: {round(self.response_counter / (time.time() - self.start_time), 2)}',
-                end='', flush=True)
 
-            for start in range(0, max_parse, 100):
-                self.response_counter += 1
-                params['start'] = start
-                session.cookie_jar.update_cookies(self.cookies[login]['cookie'])
-                async with session.get(url=url, headers=headers, params=params, proxy=proxy, ssl=True) as response:
-                    if response.status == 200:
+            async with aiohttp.ClientSession() as session:
+                for start in range(0, max_parse, 100):
+                    if start % 5 == 0:
+                        await asyncio.sleep(10)
+                    self.response_counter += 1
+                    print(
+                        f'\r[{datetime.datetime.now()}] Сделано запросов: {self.response_counter} RPS: {round(self.response_counter / (time.time() - self.start_time), 2)}',
+                        end='', flush=True)
+                    params['start'] = start
+                    session.cookie_jar.update_cookies(self.cookies[login]['cookie'])
+                    async with session.get(url=url, headers=headers, params=params, proxy=proxy, ssl=True) as response:
+                        if response.status == 200:
+                            item_text = (await response.text()).strip()
+                            info = self.get_info_from_text(item_text=item_text, appid=appid, page_num=int(start/100))
 
-                        # if (self.response_counter % 10) == 0:
-                        #    print(f"{self.response_counter} RPS: {round(self.response_counter / (time.time() - self.start_time), 2)}")
-                        item_text = (await response.text()).strip()
-                        print('SKIN', cookies[login]['currency'], skin)
-                        if """"wallet_currency":1""" in item_text:
-                            print(f"wallet_currency = 1")
-                        elif """"wallet_currency":5""" in item_text:
-                            print(f"wallet_currency = 5")
-                        elif """"wallet_currency":37""" in item_text:
-                            print(f"wallet_currency = 37")
-                        print(self.cookies[login]['client'].get_wallet_balance())
-                        info = self.get_info_from_text(item_text=item_text, appid=appid, page_num=int(start/100))
-
-                        self.stop_parsing = False
-                    elif response.status == 429:
-                        print(f'[{datetime.datetime.now()}] Слишком много запросов. Пробуем еще раз...', proxy)
-                        await asyncio.sleep(300)
-                        raise Exception
-                    else:
-                        print('RESPONSE STATUS', response.status)
-
-                    if info:
-                        if len(common_skins_info | info['skins_info']) == len(common_skins_info):
-                            break
+                            self.stop_parsing = False
+                        elif response.status == 429:
+                            print(f'[{datetime.datetime.now()}] Слишком много запросов. Пробуем еще раз...', proxy)
+                            await asyncio.sleep(300)
+                            raise Exception
                         else:
-                            common_skins_info |= info['skins_info']
-                            if 0 < len(info['skins_info']) < 100:
+                            print('RESPONSE STATUS', response.status)
+
+                        if info and response.status == 200:
+                            if len(common_skins_info | info['skins_info']) == len(common_skins_info):
                                 break
-                            await asyncio.sleep(8)
-                    else:
-                        print('NOT INFO')
-                        break
+                            else:
+                                common_skins_info |= info['skins_info']
+                                info = info['skins_info']
+                                if old_info == info:
+                                    print('ТЕ ЖЕ САМЫЕ СКИН', start, url)
+                                old_info = info
+                                needed_to_parse = []
+                                if info:
+                                    for k, v in info.items():
+                                        if v['default_price'] < default_price:
+                                            default_price = v['default_price']
+                                            default_price_without_fee = v['default_price_without_fee']
+                                    for k, v in info.items():
+                                        market_actions_link = v['link']
+                                        buy_id = v['listingid']
+                                        listing_price = v['price']
+                                        fee = v['fee']
+                                        sticker = v['stickers']
+                                        page_num = v['page_num']
+                                        wear = [[st, 0] for st in sticker]
+                                        percent = int(100 * listing_price / default_price_without_fee - 100)
+                                        ts = datetime.datetime.now()
 
-            info = common_skins_info
-            needed_to_parse = []
-            if info:
-                default_price = math.inf
-                default_price_without_fee = math.inf
-                for k, v in info.items():
-                    if v['default_price'] < default_price:
-                        default_price = v['default_price']
-                        default_price_without_fee = v['default_price_without_fee']
+                                        skin = skin
+                                        id_ = v['assetid']
+                                        if int(id_) not in self.floats and percent < max_percent:
+                                            print(id_, type(id_), id_ not in self.floats)
+                                            needed_to_parse.append((str(id_), '1', market_actions_link, listing_price,
+                                                                    default_price, str(sticker), str(wear), account_id,
+                                                                    buy_id, ts, page_num, fee))
+                                            self.floats.append(int(id_))
+
+                                    if needed_to_parse:
+                                        print(f'\r[{datetime.datetime.now()}] Выгружаю скины в базу {len(needed_to_parse)} скинов...')
+                                        await db.add_to_spam_hunting_temp(tuple(needed_to_parse))
+                                    if percent > max_percent:
+                                        break
+                                    if 0 < len(info) < 100:
+                                        break
+                                await asyncio.sleep(12)
+                        elif not info:
+                            print('NOT INFO', start, url)
+                            info0_counter += 1
+                            if info0_counter > max_parse / 200:
+                                break
+                        elif response.status != 200:
+                            print('NOT RESPONSE STATUS', response.status)
+                        else:
+                            break
 
 
-                for k, v in info.items():
-                    market_actions_link = v['link']
-                    buy_id = v['listingid']
-                    #print('BUY_ID', buy_id)
-                    listing_price = v['price']
-                    fee = v['fee']
-                    sticker = v['stickers']
-                    page_num = v['page_num']
-                    wear = [[st, 0] for st in sticker]
-                    percent = int(100 * listing_price / default_price_without_fee - 100)
-                    ts = datetime.datetime.now()
-
-                    skin = skin
-                    id_ = v['assetid']
-                    if id_ not in self.floats and percent < max_percent:
-                        needed_to_parse.append((str(id_), '1', market_actions_link, listing_price, default_price, str(sticker), str(wear), account_id, buy_id, ts, page_num, fee))
-                    listing_price = v['price']
-
-            info = {
-                'code': response.status,
-                'info': info,
-                'url': url
-            }
-            if needed_to_parse:
-                print(f'\r[{datetime.datetime.now()}] Выгружаю скины в базу...')
-                await db.add_to_spam_hunting_temp(tuple(needed_to_parse))
         except:
 
             print(3)
@@ -429,7 +444,7 @@ class FastBot:
 
 
         async with async_db.Storage() as db:
-            self.floats = await db.get_all_floats()
+            self.floats = await db.get_all_floats_from_temp()
             self.proxies = await db.fetch_hunting_proxies(ip=4)
 
             print(f'ITERATOR {iterator}')
@@ -445,10 +460,10 @@ class FastBot:
             # Создаем список задач, распределяя ссылки по потокам
             tasks = []
 
-            async with aiohttp.ClientSession() as session:
-                for idx, info in enumerate(self.hunting_info * 10):
+            if True:
+                for idx, info in enumerate(self.hunting_info):
                     proxy = self.proxies[idx % len(self.proxies)]
-                    tasks.append(asyncio.create_task(self.fetch_item(session, info, proxy, idx, db_connection=db, account_id=info['id'])))
+                    tasks.append(asyncio.create_task(self.fetch_item(info, proxy, idx, db_connection=db, account_id=info['id'])))
                 # Параллельное выполнение всех запросов
 
                 await asyncio.gather(*tasks)
@@ -467,29 +482,39 @@ async def get_proxies_and_hunting_info():
     async with async_db.Storage() as db:
         proxies = await db.fetch_hunting_proxies()
         hunting_info = await db.get_hunting_info()
-        users = [await db.get_spam_user(acc['login']) for acc in hunting_info]
+        users = [await db.get_spam_user(acc['login_to_buy']) for acc in hunting_info]
         return [proxies, users]
 
 cookies = dict()
 
 def get_cookie(account, proxy):
-    acc: SteamClient = Bot(acc_info = account, proxy=proxy)
-    session= acc.steam_login()
-    cookies[account['login']] = {'cookie': session._session.cookies,
-                                'client': session,
-                                'currency': account['currency'],
-                                 'login': account['login']}
+    if account['login'] not in cookies:
+        acc: SteamClient = Bot(acc_info = account, proxy=proxy)
+        print('ACCOUNT', account)
+        session = acc.steam_login()
+        cookies[account['login']] = {'cookie': session._session.cookies,
+                                    'client': session,
+                                    'currency': account['currency'],
+                                     'login': account['login']}
 
 
 
 while True:
     for iterator in range(100):
-        if iterator % 20 == 0:
-            proxies, hunting_info = asyncio.run(get_proxies_and_hunting_info())
+        if iterator % 100 == 0:
+            proxies, old_hunting_info = asyncio.run(get_proxies_and_hunting_info())
+
+            hunting_info = []
+            for item in old_hunting_info:
+                if item not in hunting_info:
+                    hunting_info.append(item)
+
             threads = [threading.Thread(target=get_cookie, args=value) for value in
                        zip(hunting_info, proxies)]
+
             for thread in threads:
                 thread.start()
+                time.sleep(1)
             for thread in threads:
                 thread.join()
         bot = FastBot(cookies)

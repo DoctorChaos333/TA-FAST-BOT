@@ -12,6 +12,7 @@ import subprocess
 import aiofiles
 import cryptography
 import pymysql
+import math
 import traceback
 
 import pandas as pd
@@ -38,7 +39,7 @@ def is_rarity(skin, fl, percent):
     return False
 
 dotenv_path = "C:\\Users\\Administrator\\Desktop\\TA-FAST-BOT-main\\.env"
-load_dotenv()
+load_dotenv(dotenv_path = "C:\\Users\\Administrator\\Desktop\\TA-FAST-BOT-main\\.env")
 
 class Storage:
     connection = contextvars.ContextVar('connection')
@@ -232,8 +233,7 @@ class Storage:
         min_value, max_value = list(map(float, needed_float_value.replace(',', '.').split('-')))
         if min_value < float(fl) < max_value:
             query = "INSERT IGNORE INTO spam_ticket (steam_login, skin, buy_id, price, bot_price, default_price, float_value, sticker, page_num, is_hunting, fee) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
-            await self.execute(query, (login_to_buy, skin, buy_id, price, bot_price, default_price, fl, sticker, page_num, is_hunting, fee))
-        
+            await self.execute(query, (login_to_buy, skin, buy_id, price, bot_price, default_price, fl, sticker, page_num, is_hunting, fee))       
 
     async def fetch_hunt_temp(self):
         query = "SELECT * FROM spam_hunting_temp WHERE fl = 1"
@@ -311,3 +311,24 @@ class Storage:
         else:
             query = "UPDATE spam_users SET last_session_ts = %s WHERE login = %s"
             await self.execute(query, (ts, login))
+
+    async def update_ticket_status(self, buy_id: str, status: int):
+        ts = datetime.datetime.now()
+        if status == 1:
+            query = "UPDATE spam_ticket SET success = 1, completed = 1, ts_attempt = %s WHERE buy_id = %s"
+        else:
+            query = "UPDATE spam_ticket SET already = 1, completed = 1, ts_attempt = %s WHERE buy_id = %s"
+        await self.execute(query, (ts, buy_id))
+    async def get_all_floats_from_temp(self):
+        query = "SELECT id FROM spam_hunting_temp"
+        floats = await self.fetchall(query)
+        floats = [item['id'] for item in floats]
+        return floats
+    async def get_default_price(self, account_id):
+        query = "SELECT default_price, fee FROM spam_hunting_temp WHERE ts > NOW() - INTERVAL 5 HOUR AND account_id = %s"
+        default_prices = await self.fetchall(query, (account_id))
+        if default_prices:
+            default_price_and_fee = min([(item['default_price'], item['fee']) for item in default_prices], key = lambda x: x[0])
+            return default_price_and_fee
+        else:
+            return (math.inf, math.inf)
