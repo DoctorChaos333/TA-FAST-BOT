@@ -502,6 +502,7 @@ def get_cookie(account, proxy):
 while True:
     for iterator in range(100):
         if iterator % 100 == 0:
+            time.sleep(0.2)
             proxies, old_hunting_info = asyncio.run(get_proxies_and_hunting_info())
 
             hunting_info = []

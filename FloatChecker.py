@@ -9,6 +9,7 @@ import cloudscraper
 import async_db
 import pandas as pd
 import time
+import gc
 
 df = pd.read_excel('База предметов.xlsx')
 result_dict = dict(zip(df['Предмет'], df['Какой float ценится']))
@@ -54,12 +55,15 @@ class FloatParser:
                     {'https': proxy,
                      'http': proxy}
                 )
+        self.items_to_update = []
+        self.last_ts = datetime.datetime.now()
 
     async def parse_floats(self):
 
         self.scraper = cloudscraper.create_scraper(
             browser={'browser': 'firefox', 'platform': 'windows', 'mobile': False})
-
+        self.items = [i for i in self.items if i['percent'] > -10]
+        
         while self.items:
             time.sleep(5)
             min_count = min([len(self.items), len(self.proxies)])
@@ -69,14 +73,23 @@ class FloatParser:
             t1 = time.time()
             threads = [threading.Thread(target=self.th_parse_floats, args=(item_thread[i], proxy_thread[i], i)) for i in
                        range(min_count)]
+            
             for thread in threads:
                 thread.start()
             for thread in threads:
                 thread.join()
             self.result_thread = [element for element in self.result_thread if len(element) > 0]
-
+            
+            #print(*self.items_to_update, sep='\n')
+            
+            
+            
             async with async_db.Storage() as db:
                 await db.smthmany(self.result_thread, name='spam_profit')
+
+            if len(self.items_to_update) > 1:
+                async with async_db.Storage() as db:
+                    await db.delete_ids(self.items_to_update)
 
     def th_parse_floats(self, item: dict, proxy: dict, idx: int):
 
@@ -109,11 +122,13 @@ class FloatParser:
         steam_without_fee = item['steam_without_fee']
         sticker = item['sticker']
         url = item['url']
-        ts = datetime.datetime.now() - datetime.timedelta(seconds=idx)
+        ts = self.last_ts + datetime.timedelta(seconds=1)
+        self.last_ts += datetime.timedelta(seconds=1)
         wear = item['wear']
         sticker_slot = item['sticker_slot']
         sticker_price = item['sticker_price']
         profit = item['profit']
+        #old_profit = float(profit)
         percent = item['percent']
         page_num = item['page_num']
 
@@ -152,6 +167,7 @@ class FloatParser:
                         profit = float(profit)
                         percent =float(percent)
                         
+                        
                         listing_price = float(listing_price)
                         default_price = float(default_price)
                         wear = eval(wear)
@@ -169,8 +185,6 @@ class FloatParser:
                                 print('ОШИБКА')
                                 print(wear)
                                 print('\n' * 5)
-                            print('\n' * 5)
-                            print('\n' * 5)
                             if name in wear_dict:
                                 if wear_dict.get(name):
                                     wear[i][1] = wear_dict[name].pop(0)
@@ -187,22 +201,43 @@ class FloatParser:
                             print('price', sticker_price, len(sticker_price))
                             print('slot', sticker_slot, len(sticker_slot))
                             print('\n' * 5)
+                            input()
                             return 0
+                        
+                        sticker_addition_price = 0
+                        
                         for j in range(len(sticker)):
                             try:
                                 st_price = float(sticker_price[j][1])
                             except:
                                 return 0
                             if wear[j][1] != 0 and sticker.count(sticker[j]) == 1:
-
+                            
                                 if st_price > 30000:
                                     profit -= (st_price * 0.045)
                                 elif 10000 < st_price < 30000:
                                     profit -= (st_price * 0.085)
                                 elif st_price < 10000:
                                     profit -= (st_price * 0.095)
+                            
+                            #if sticker.count(sticker.count(sticker[j])) == 2:
+                            #    sticker_addition_price += st_price * 0.2
+                            #elif sticker.count(sticker.count(sticker[j])) == 3:
+                            #    sticker_addition_price += st_price * 0.25
+                            #elif sticker.count(sticker.count(sticker[j])) > 3:
+                            #    sticker_addition_price += st_price * 0.3
+                            #elif sticker.count(sticker.count(sticker[j])) == 1 and wear[j][1] == 0:
+                            #        if st_price > 30000:
+                            #            sticker_addition_price += (st_price * 0.045)
+                            #        elif 10000 < st_price < 30000:
+                            #            sticker_addition_price += (st_price * 0.085)
+                            #        elif st_price < 10000:
+                            #            sticker_addition_price += (st_price * 0.095)
+                            
+                        #profit = (default_price * 0.87 + sticker_addition_price - listing_price)
 
                         profit = round(profit, 2)
+                        #print(sticker_price)
                         percent = round(profit / listing_price * 100, 2)
 
                         wear = str(wear)
@@ -211,13 +246,17 @@ class FloatParser:
                         sticker_slot = str(sticker_slot)
                         
 
-                    print(skin, float_value, profit)
-                    if float_value:
+                    #print(skin, float_value, profit, old_profit)
+                    #if old_profit > profit:
+                    #    print(buy_id, wear)
+                    if float_value and percent > -10:
                         fl = float_value
 
                         self.result_thread[idx] = (
                             buy_id, skin, id_, listing_price, default_price, steam_without_fee, sticker, url, ts, wear,
                             sticker_slot, sticker_price, profit, percent, fl, page_num)
+                    else: 
+                        self.items_to_update.append(id_)
                 else:
                     print('NOT SUCCESS')
             else:
@@ -231,14 +270,15 @@ async def get_items():
 
 
 def main():
-    start_time = time.time()
+    
     while True:
         items = asyncio.run(get_items())
 
         try:
             if items:
                 print('ВСЕГО ОБНАРУЖЕНО ССЫЛОК', len(items))
-                float_parser = FloatParser(items)
+                float_parser = FloatParser(items.copy())
+                del items
                 asyncio.run(float_parser.parse_floats())
             else:
                 print(f'\r[{datetime.datetime.now()}] ПОКА НЕТ ПРЕДМЕТОВ', flush=True, end='')

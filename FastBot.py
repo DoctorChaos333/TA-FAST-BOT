@@ -512,7 +512,7 @@ class FastBot:
                         self.stickers[skin] = default_price
                     elif 'Sticker |' not in str(skin):
                         # print('MARKET ACTIONS', market_actions_link)
-                        if (percent > 0 and sticker) or (idx > int(self.len_links * divis) and percent > -30):
+                        if (percent > 0 and sticker) or (idx > int(self.len_links * divis) and percent > -10):
                             skin_lots.append((str(buy_id), str(skin), str(id_), str(listing_price), str(default_price),
                                               str(steam_without_fee), str(sticker), str(link_to_found), str(ts),
                                               str(wear), str(sticker_slot), str(sticker_price), str(profit),
@@ -600,6 +600,7 @@ class FastBot:
 
 
 while True:
+    start_console_ts = time.time()
     try:
         bot = FastBot()
         with open('baza730.txt', 'r', encoding='utf-8') as file:
@@ -615,6 +616,11 @@ while True:
         divis = 0.95
 
         while baza730:
+
+            if time.time() - start_console_ts > 900:
+                os.system('cls')
+                start_console_ts = time.time()
+            
             pack_of_names = []
             for i in range(int(step*divis)):
                 if baza730:

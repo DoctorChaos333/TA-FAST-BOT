@@ -1,13 +1,16 @@
 import asyncio
 import datetime
-import threading
 import time
 import traceback
-
+from asyncio import AbstractEventLoop
+import tracemalloc
 import async_db
 import cloudscraper
 import fake_useragent
 import pandas as pd
+import gc
+from memory_profiler import profile
+from concurrent.futures import ThreadPoolExecutor
 
 df = pd.read_excel('База предметов.xlsx')
 result_dict = dict(zip(df['Предмет'], df['Какой float ценится']))
@@ -15,9 +18,14 @@ for k in result_dict:
     v = result_dict[k]
     v1 = [[float(num) for num in item.split('-')] for item in v.split(' | ')]
     result_dict[k] = v1
+del v
+del v1
+del df
+del k
 
 
 def is_rarity(skin, fl, percent):
+    print(22)
     fl = float(fl)
     percent = float(percent)
 
@@ -31,26 +39,25 @@ def is_rarity(skin, fl, percent):
         return True
 
     return False
-
-async def update_base(id_, wear='[]', fl = 1, account_id = None, listing_price = None, default_price = None, buy_id = None, page_num=0, is_hunting=1, fee=0):
+#id_, wear='[]', fl = 1, account_id = None, listing_price = None, default_price = None, buy_id = None, page_num=0, is_hunting=1, fee=0
+async def update_base(args):
     async with async_db.Storage() as db:
-        await db.update_hunting_temp(str(id_), str(wear), str(round(fl, 10)), account_id=account_id, price=listing_price, default_price=default_price, buy_id=buy_id, page_num=page_num, is_hunting=is_hunting, fee=fee)
-        print(f"\rДобавил предмет {id_} в базу", end='', flush=True)
+        await db.update_hunting_temp(args)
+        print(f"\rДобавил предмет {[arg[0] for arg in args]} в базу", end='', flush=True)
+    del db
+    del args
+    return None
 
+tasks_ids = set()
 
-params = {
-    'url': 'steam://rungame/730/76561202255233023/ csgo_econ_action_preview M5258603558030077991A39231682804D9241503133585526237'
-}
-url = 'https://floats.steaminventoryhelper.com/?url=steam://rungame/730/76561202255233023/+csgo_econ_action_preview%20M5258603558030077991A39231682804D9241503133585526237'
-
-
-# print(scraper.get(url=url).json())
-# input()
 class HuntingParser:
     def __init__(self, items):
         self.scraper = None
         self.result_thread = None
         self.items = items
+        self.items_to_update = []
+        self.update_counter = 0
+        self.loop: AbstractEventLoop = None
 
     async def parse_floats(self):
 
@@ -60,16 +67,23 @@ class HuntingParser:
         min_count = min([len(self.items)])
 
         self.result_thread = [() for _ in range(min_count)]
-        threads = [threading.Thread(target=self.th_parse_floats, args=value) for value in
-                   self.items]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join()
+        
+        with ThreadPoolExecutor(max_workers=len(self.items), thread_name_prefix='___71___') as executor:
+            futures = [executor.submit(self.th_parse_floats, value) for value in self.items]
+            for future in futures:
+                future.result()
+            executor.shutdown(wait=True)
+            for future in futures:
+                print(future.running())
+                future.cancel()
+                print(future.running())
+            del future
+            del futures
+            gc.collect()
 
         time.sleep(5)
 
-    def th_parse_floats(self, *args):
+    def th_parse_floats(self, args):
         for item in args:
             link = item['market_actions']
             headers = {
@@ -130,6 +144,7 @@ class HuntingParser:
                         response = self.scraper.get(fl_url, proxies=proxy, headers=headers, verify=True, timeout=5)
                         print('Но нашел в CSFLOAT')
                     except:
+                        print(traceback.format_exc())
                         print('CS FLOAT тоже не нашел')
                         continue
                 if response.status_code == 200:
@@ -165,16 +180,36 @@ class HuntingParser:
                                         wear[i][1] = wear_dict[name].pop(0)
                                     else:
                                         wear[i][1] = 0
+                            del api_wear
+                            del wear_dict
 
                         print('Нашел float value', id_, wear, float_value)
                         if float_value:
                             fl = float_value
-                        asyncio.run(update_base(id_, wear, fl, account_id, listing_price, default_price, buy_id, page_num, is_hunting, fee))
+                        self.items_to_update.append([id_, wear, fl, account_id, listing_price, default_price, buy_id, page_num, is_hunting, fee])
+
+                        if len(self.items_to_update) >= len(self.items) or self.items[-1] == []:
+                            self.update_counter = 0
+                            temp_items = self.items_to_update.copy()
+                            self.items_to_update = []
+                            new_loop = asyncio.new_event_loop()
+                            new_loop.run_until_complete(update_base(temp_items))
+                            new_loop.close()
+                            pass
+                            #del new_loop
+                        else:
+                            self.update_counter += 1
                     else:
                         print('NOT SUCCESS')
                 else:
                     print(response.status_code, proxy)
-
+        if args:
+            del item
+            del response
+            del rs_json
+            del item_info
+            del float_value
+            del stickers
 
 async def fetch_hunt_temp():
     async with async_db.Storage() as db:
@@ -189,14 +224,28 @@ async def fetch_proxy():
 
 
 def main():
+    tracemalloc.start()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
     while True:
-        items = asyncio.run(fetch_hunt_temp())
-        proxies = asyncio.run(fetch_proxy())
+        gc.collect()
+        snapshot = tracemalloc.take_snapshot()  # Снимок состояния памяти
+        top_stats = snapshot.statistics('lineno')  # Статистика по строкам кода
+        #print(top_stats[:10])
+        line = '\n'.join(str(i) for i in top_stats[:10])
+        print(f'\r{line}', end='', flush=True)
+        gc.collect()
+        time.sleep(1)
+        items = loop.run_until_complete(fetch_hunt_temp())
+        proxies = loop.run_until_complete(fetch_proxy())
         proxies_pack = [[] for i in range(len(proxies))]
         new_items_values = []
         for item in items.values():
             for j in item:
                 new_items_values.append(j)
+
+
 
         for i in range(len(new_items_values)):
 
@@ -205,14 +254,31 @@ def main():
             value['proxy'] = proxies[idx]
             proxies_pack[idx].append(value)
 
+        if items:
+            del item
+            del j
+
         try:
             if items and proxies:
+                items.clear()
+                proxies.clear()
                 print('ВСЕГО ПОТОКОВ', len(proxies_pack))
                 float_parser = HuntingParser(proxies_pack)
-                asyncio.run(float_parser.parse_floats())
+                loop.run_until_complete(float_parser.parse_floats())
+                float_parser.items_to_update.clear()
+                float_parser.result_thread = []
+                float_parser.items = []
+                del float_parser
+
             else:
-                print(f'\r[{datetime.datetime.now()}] ПОКА НЕТ ПРЕДМЕТОВ ДЛЯ ПАРСИНГА ФЛОТОВ', flush=True, end='')
+                print(f'[{datetime.datetime.now()}] ПОКА НЕТ ПРЕДМЕТОВ ДЛЯ ПАРСИНГА ФЛОТОВ')
                 time.sleep(0.3)
+
+            del items
+            del proxies
+            del new_items_values
+            del proxies_pack
+            gc.collect()
         except:
             print(traceback.format_exc())
             time.sleep(10)

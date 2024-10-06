@@ -14,6 +14,8 @@ import cryptography
 import pymysql
 import math
 import traceback
+import time
+import gc
 
 import pandas as pd
 df = pd.read_excel('База предметов.xlsx')
@@ -25,8 +27,9 @@ for k in result_dict:
 
 def is_rarity(skin, fl, percent):
     fl = float(fl)
-
+    
     percent = float(percent)
+    
     if percent > -10:
         return True
     if result_dict.get(skin):
@@ -131,6 +134,7 @@ class Storage:
         elif name == 'spam_profit':
 
             if args:
+                ts = time.time()
                 query = """INSERT IGNORE INTO `spam_profit` (buy_id, skin, id, listing_price, default_price, steam_without_fee, sticker, url, ts, wear, sticker_slot, sticker_price, profit, percent, fl, page_num) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
                 ids = [arg[2] for arg in args]
                 print(f'Добавляю id {ids} в базу флотов')
@@ -138,6 +142,7 @@ class Storage:
                 for arg in args:
                     if is_rarity(arg[1], arg[-2], arg[-3]):
                         filtered_args.append(arg)
+                
                 if filtered_args:
                     for arg in filtered_args:
                         lst_arg = list(arg)
@@ -154,6 +159,11 @@ class Storage:
                 query = F"INSERT INTO spam_float (id, fl, wear, ts) VALUES (%s, %s, %s, %s) ON DUPLICATE KEY UPDATE wear = VALUES(wear)"
                 float_args = [(item[2], item[-2], item[-7], item[-8]) for item in args]
                 await self.executemany(query, float_args)
+                
+
+    async def delete_ids(self, args):
+        query = f"DELETE FROM spam_profit_temp WHERE id IN {tuple(args)}"
+        await self.execute(query)
 
     async def is_float_exists(self, buy_id):
         query = "SELECT `fl` FROM `spam_profit_temp` WHERE buy_id = %s"
@@ -189,13 +199,17 @@ class Storage:
             return -1
 
     async def fetch_temp(self):
+        ts = time.time()
+        query = "DELETE FROM spam_profit_temp WHERE id IN (SELECT id FROM spam_profit);"
+        await self.execute(query)
         # query = "SELECT * FROM spam_profit_temp WHERE id NOT IN (SELECT id FROM spam_profit)"
         query = "DELETE FROM spam_profit WHERE ts < NOW() - INTERVAL 7 HOUR;"
         await self.execute(query)
-        query = "DELETE FROM spam_profit_temp WHERE ts < NOW() - INTERVAL 7 HOUR;"
+        query = "DELETE FROM spam_profit_temp WHERE percent < -10 OR ts < NOW() - INTERVAL 7 HOUR;"
         await self.execute(query)
         print('Удалил все старые предметы из spam_profit')
-        query = "SELECT * FROM spam_profit_temp"
+        await asyncio.sleep(1)
+        query = "SELECT * FROM spam_profit_temp WHERE percent > -10 LIMIT 500"
         rs = await self.fetchall(query)
         rs = sorted(rs, key=lambda x: x['profit'], reverse=True)
         #print(len(rs))
@@ -205,35 +219,79 @@ class Storage:
             floats_dct = {item['id']: {'fl': item['fl'], 'wear': item['wear']} for item in floats}
             for item in rs:
                 if item['id'] in floats_dct:
-                    print(floats_dct[item['id']])
                     item['fl'] = floats_dct[item['id']]['fl']
                     item['wear'] = floats_dct[item['id']]['wear']
             rs = list(filter(lambda x: is_rarity(x['skin'], float(x['fl']), x['profit']), rs))
-        if len(rs) > 1000:
-            return rs[:1000]
+
         return rs
 
-    async def update_hunting_temp(self, id_, wear, fl, account_id, buy_id, price, default_price, sticker='float', page_num=0, is_hunting=0, fee=0):
-        query = "UPDATE spam_hunting_temp SET fl = %s, wear = %s WHERE id = %s"
+    async def update_hunting_temp(self, args):
         try:
-            await self.execute(query, (fl, wear, id_))
+            query = "UPDATE spam_hunting_temp SET fl = %s, wear = %s WHERE id = %s"
+            args_to_spam_hunting_temp = [[arg[2] if arg[2] else 1, str(arg[1]) if arg[1] else '[]', arg[0]] for arg in args]
+            await self.executemany(query, args_to_spam_hunting_temp)
+            del args_to_spam_hunting_temp
         except:
             print(traceback.format_exc())
-        ts = datetime.datetime.now()
-        print(f'Добавил в базу флотов {id_}')
-        query = F"INSERT INTO spam_float (id, fl, wear, ts) VALUES (%s, %s, %s, %s) ON DUPLICATE KEY UPDATE wear = VALUES(wear), ts = VALUES(ts)"
-        await self.execute(query, (id_, fl, wear, ts))
 
-        info = await self.get_hunting_float(account_id)
-        needed_float_value = info['float_value']
-        login_to_buy = info['login_to_buy']
-        skin = info['skin']
-        bot_price = round(price * 0.87, 2)
+        try:
+            query = F"INSERT INTO spam_float (id, fl, wear, ts) VALUES (%s, %s, %s, %s) ON DUPLICATE KEY UPDATE wear = VALUES(wear), ts = VALUES(ts)"
+            ts = datetime.datetime.now()
+            args_to_spam_float = [[arg[0], arg[2] if arg[2] else 1, str(arg[1]) if arg[1] else '[]', ts] for arg in args]
+            await self.executemany(query, args_to_spam_float)
+            del args_to_spam_float
+            print(f'Добавил в базу флотов {[arg[0] for arg in args]}')
+        except:
+            print(traceback.format_exc())
 
-        min_value, max_value = list(map(float, needed_float_value.replace(',', '.').split('-')))
-        if min_value < float(fl) < max_value:
-            query = "INSERT IGNORE INTO spam_ticket (steam_login, skin, buy_id, price, bot_price, default_price, float_value, sticker, page_num, is_hunting, fee) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
-            await self.execute(query, (login_to_buy, skin, buy_id, price, bot_price, default_price, fl, sticker, page_num, is_hunting, fee))       
+        account_ids = list({arg[3] for arg in args})
+
+        #Работа с тикетами
+
+        common_info = await self.get_hunting_float(account_ids)
+        for arg in args:
+            info = common_info[arg[3]]
+            fl = arg[2]
+            price = arg[4]
+            default_price = arg[5]
+            buy_id = arg[6]
+            page_num = arg[7]
+            is_hunting = arg[8]
+            fee = arg[9]
+            sticker = ''
+            needed_float_value = info['float_value']
+            login_to_buy = info['login_to_buy']
+            skin = info['skin']
+            bot_price = round(price * 0.87, 2)
+
+            min_value, max_value = list(map(float, needed_float_value.replace(',', '.').split('-')))
+            if min_value < float(fl) < max_value:
+                query = "INSERT IGNORE INTO spam_ticket (steam_login, skin, buy_id, price, bot_price, default_price, float_value, sticker, page_num, is_hunting, fee) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                await self.execute(query, (login_to_buy, skin, buy_id, price, bot_price, default_price, fl, sticker, page_num, is_hunting, fee))
+        del account_ids
+        del arg
+        del max_value
+        del min_value
+        del common_info
+        del info
+        del fl
+        del price
+        del default_price
+        del buy_id
+        del page_num
+        del is_hunting
+        del fee
+        del sticker
+        del needed_float_value
+        del login_to_buy
+        del skin
+        del bot_price
+        del args
+        del query
+        del ts
+        del self
+        gc.collect()
+
 
     async def fetch_hunt_temp(self):
         query = "SELECT * FROM spam_hunting_temp WHERE fl = 1"
@@ -263,10 +321,12 @@ class Storage:
             )
         return items_dict
     
-    async def get_hunting_float(self, account_id):
-        query = "SELECT * FROM spam_hunting WHERE id = %s"
-        info = await self.fetchone(query, account_id)
+    async def get_hunting_float(self, account_ids):
+        pattern = ", ".join(["%s" for _ in range(len(account_ids))])
+        query = f"SELECT * FROM spam_hunting WHERE id IN ({pattern})"
+        info = await self.fetchall(query, account_ids)
         if info :
+            info = {item['id']: item for item in info}
             return info
     async def add_to_spam_hunting_temp(self, args: tuple):
         query = "INSERT IGNORE INTO spam_hunting_temp (id, fl, market_actions, listing_price, default_price, sticker, wear, account_id, buy_id, ts, page_num, fee) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
@@ -315,9 +375,11 @@ class Storage:
     async def update_ticket_status(self, buy_id: str, status: int):
         ts = datetime.datetime.now()
         if status == 1:
-            query = "UPDATE spam_ticket SET success = 1, completed = 1, ts_attempt = %s WHERE buy_id = %s"
-        else:
-            query = "UPDATE spam_ticket SET already = 1, completed = 1, ts_attempt = %s WHERE buy_id = %s"
+            query = "UPDATE spam_ticket SET success = 1, completed = 1, ts_attempt_last = %s WHERE buy_id = %s"
+        elif status == 0:
+            query = "UPDATE spam_ticket SET already = 1, completed = 1, ts_attempt_last = %s WHERE buy_id = %s"
+        elif status == -1:
+            query = "UPDATE spam_ticket SET ts_attempt_first = %s WHERE buy_id = %s"
         await self.execute(query, (ts, buy_id))
     async def get_all_floats_from_temp(self):
         query = "SELECT id FROM spam_hunting_temp"
