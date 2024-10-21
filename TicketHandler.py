@@ -12,6 +12,7 @@ import re
 import json
 import fake_useragent
 
+
 currencies = {
             "2001": "USD",
             "2002": "GBP",
@@ -161,8 +162,8 @@ class Bot:
 
 
 proxy = {
-    'https': 'http://user206276:j97rcb@212.52.5.18:8831',
-    'http': 'http://user206276:j97rcb@212.52.5.18:8831,'
+    'https': 'http://TATGoWcragRwuETA:m0sgyj@195.96.159.131:1310',
+    'http': 'http://TATGoWcragRwuETA:m0sgyj@195.96.159.131:1310,'
 }
 
 async def ticket_table_checker():
@@ -185,25 +186,39 @@ async def update_ticket_status(buy_id: str, status: int):
     async with async_db.Storage() as db:
         return await db.update_ticket_status(buy_id, status)
 
+
 def main():
     while True:
         time.sleep(0.5)
         new_tickets = asyncio.run(ticket_table_checker())
         if new_tickets:
+
+            autobuy_spam_users = [u for u in asyncio.run(get_spam_users()) if u['auto_buy']]
+            #Список из словарей вида {'login': 'rVtRvcJbjY', 'password': '2uDzYalSPTB', 'steamID': '76561199513749651', 'shared': '3bhL51ug5dMycDbFcTlSxEOdWnw=', 'identity': 'KvZIBt1wwfPyQkBnbMJ1RVE5LH8=', 'session': None, 'API': '4510CAB674C19960D68CA6FFA50A08BB', 'last_session_ts': datetime.datetime(2024, 9, 23, 23, 23, 44), 'currency': 'KZT', 'auto_buy': 1, 'auto_buy_percent': 80, 'tariff': 299}
+
+
             for ticket in new_tickets:
-                login = ticket['steam_login']
-                user = asyncio.run(get_spam_user(login))
-                if user:
-                    bot = Bot(user)
-                    session = bot.steam_login()
-                    currency = user['currency']
-                    skin = ticket['skin']
-                    buy_id = ticket['buy_id']
-                    currency = eval(f"Currency.{currency}")
-                    is_hunting=ticket['is_hunting']
-                    price = ticket['price']
-                    fee = ticket['fee']
-                    buy_ticket_item(session, skin, buy_id, appid='730', currency=currency, is_hunting=is_hunting, price=price, fee=fee)
+                print(f'\r[{datetime.datetime.now()}] Нашел новый тикет {ticket}', end='', flush=True)
+
+                try:
+                    login = ticket['steam_login']
+                    user = asyncio.run(get_spam_user(login))
+
+                    if True:
+                        bot = Bot(user)
+                        session = bot.steam_login()
+                        currency = user['currency']
+                        skin = ticket['skin']
+                        buy_id = ticket['buy_id']
+                        currency = eval(f"Currency.{currency}")
+                        is_hunting=ticket['is_hunting']
+                        price = ticket['price']
+                        fee = ticket['fee']
+                        asyncio.run(update_ticket_status(buy_id, -1))
+                        buy_ticket_item(session, skin, buy_id, appid='730', currency=currency, is_hunting=is_hunting, price=price, fee=fee)
+
+                except:
+                    asyncio.run(update_ticket_status(buy_id, 0))
         else:
             print(f'\r[{datetime.datetime.now()}] Нет новых тикетов', end='', flush=True)
 
@@ -218,6 +233,7 @@ def buy_ticket_item(session: SteamClient, skin, buy_id, appid='730', currency=Cu
     url = convert_name_to_link(skin, appid)
     params = {'count': 100}
     headers = {'User-Agent': fake_useragent.UserAgent().chrome}
+    
     for _ in range(3):
         if is_hunting == 1:
             try:
@@ -275,5 +291,6 @@ def buy_ticket_item(session: SteamClient, skin, buy_id, appid='730', currency=Cu
                 print(response.status_code)
     else:
         asyncio.run(update_ticket_status(buy_id, 0))
+
 if __name__ == '__main__':
     main()

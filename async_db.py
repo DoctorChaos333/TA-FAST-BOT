@@ -38,11 +38,13 @@ def is_rarity(skin, fl, percent):
                 return True
     if fl == 1:
         return True
-
+    for d in '0123456789':
+        if 3*d in str(fl)[:7]:
+            return True
     return False
 
 dotenv_path = "C:\\Users\\Administrator\\Desktop\\TA-FAST-BOT-main\\.env"
-load_dotenv(dotenv_path = "C:\\Users\\Administrator\\Desktop\\TA-FAST-BOT-main\\.env")
+load_dotenv(dotenv_path = ".env")
 
 class Storage:
     connection = contextvars.ContextVar('connection')
@@ -150,8 +152,8 @@ class Storage:
                         lst_arg[-8] = datetime.datetime.now()
                         arg = tuple(lst_arg)
                         await self.execute(query, arg)
-                for i in filtered_args:
-                    print('Добавляю', i, 'в spam_profit')
+                        print('Добавляю', arg[2], 'в spam_profit')
+
                 ids_str = ",".join(str(id) for id in ids)
                 query = "DELETE FROM spam_profit_temp WHERE id IN ({})".format(ids_str)
                 await self.execute(query)
@@ -203,7 +205,7 @@ class Storage:
         query = "DELETE FROM spam_profit_temp WHERE id IN (SELECT id FROM spam_profit);"
         await self.execute(query)
         # query = "SELECT * FROM spam_profit_temp WHERE id NOT IN (SELECT id FROM spam_profit)"
-        query = "DELETE FROM spam_profit WHERE ts < NOW() - INTERVAL 7 HOUR;"
+        query = "DELETE FROM spam_profit WHERE ts < NOW() - INTERVAL 24 HOUR;"
         await self.execute(query)
         query = "DELETE FROM spam_profit_temp WHERE percent < -10 OR ts < NOW() - INTERVAL 7 HOUR;"
         await self.execute(query)
@@ -356,7 +358,7 @@ class Storage:
         return await self.fetchall(query)
 
     async def get_spam_users(self):
-        query = "SELECT login, password, steamID, shared, identity, session, API, last_session_ts, currency FROM spam_users WHERE is_active = 1"
+        query = "SELECT login, password, steamID, shared, identity, session, API, last_session_ts, currency, auto_buy, auto_buy_percent, tariff FROM spam_users WHERE is_active = 1"
         return await self.fetchall(query)
 
     async def get_spam_user(self, login):
@@ -394,3 +396,47 @@ class Storage:
             return default_price_and_fee
         else:
             return (math.inf, math.inf)
+
+    async def analyze_all_base(self):
+        print('Дошел')
+        query = "SELECT skin FROM spam_profit"
+        skins = await self.fetchall(query)
+        skins = [skin['skin'] for skin in skins]
+        skins_info = dict()
+        for skin in skins:
+            if skin not in skins_info:
+                skins_info[skin] = skins.count(skin)
+
+        # Загружаем существующие данные, если файл уже существует
+        if os.path.exists('skins_analyzed_data.json'):
+            with open('skins_analyzed_data.json', 'r', encoding='utf-8') as file:
+                existing_data = json.load(file)
+
+            # Обновляем словарь
+            for skin, count in skins_info.items():
+
+                if not existing_data.get(skin) or not isinstance(existing_data[skin], list):
+                    existing_data[skin] = []
+
+                existing_data[skin].append([count, str(datetime.datetime.now())])
+
+            skins_info = existing_data
+
+
+        # Записываем обновленный словарь в файл
+        with open('skins_analyzed_data.json', 'w', encoding='utf-8') as file:
+            json.dump(skins_info, file, indent=4, ensure_ascii=False)
+
+    async def insert_data(self):
+        query = "SELECT * FROM spam_profit WHERE ts > NOW() - INTERVAL 5 HOUR"
+        items = await self.fetchall(query)
+        some_items = []
+        counter = 6000
+        for value in items:
+            counter += 1
+            #buy_id, skin, id, listing_price, default_price, steam_without_fee, sticker, url, ts, wear, sticker_slot, sticker_price, profit, percent, market_actions, fl, page_num
+            value['ts'] -= datetime.timedelta(hours=4)
+            value['id'] = counter
+            some_items.append([value[i] for i in 'buy_id, skin, id, listing_price, default_price, steam_without_fee, sticker, url, ts, wear, sticker_slot, sticker_price, profit, percent, fl, page_num'.split(', ')])
+        query = """INSERT IGNORE INTO `spam_profit` (buy_id, skin, id, listing_price, default_price, steam_without_fee, sticker, url, ts, wear, sticker_slot, sticker_price, profit, percent, fl, page_num) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+        await self.executemany(query, some_items)

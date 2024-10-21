@@ -27,6 +27,7 @@ from steampy.models import GameOptions
 
 db = async_db.Storage()
 
+
 class Bot:
     def __init__(self, steam_data: dict = None, proxies: dict = None):
         self.steam_data = steam_data
@@ -212,7 +213,6 @@ class FastBot:
         try:
             if assets_line and json.loads(assets_line.group(1)):
                 assets = json.loads(assets_line.group(1))[appid]['2']
-                # print('ОШШИБКА', json.loads(assets_line.group(1))[appid])
             else:
                 return {}
 
@@ -326,17 +326,13 @@ class FastBot:
         }
 
         # Независимая задержка для каждого запроса
-        t1 = random.randint(7900, 8000) / 1000 * (idx // len(self.proxies))
+        t1 = random.randint(8900, 9000) / 1000 * (idx // len(self.proxies))
         await self.delayed_request(session, url, headers, params, proxy, db_connection, t1, url_el, idx, appid)
 
     async def delayed_request(self, session, url, headers, params, proxy, db_connection, t1, url_el, idx, appid, max_parse=300):
 
         await asyncio.sleep(t1)  # Задержка перед выполнением запроса
-        #if (self.response_counter / len(self.proxies)) % 15 == 0 and self.response_counter > 0:
-        #    print(
-        #        f'\r[{datetime.datetime.now()}] Перерыв в запросах...',
-        #        end='', flush=True)
-        #    await asyncio.sleep(75)
+
 
 
         # Выполнение самого запроса
@@ -359,8 +355,6 @@ class FastBot:
                 async with session.get(url=url, headers=headers, params=params, proxy=proxy, ssl=True) as response:
                     if response.status == 200:
 
-                        # if (self.response_counter % 10) == 0:
-                        #    print(f"{self.response_counter} RPS: {round(self.response_counter / (time.time() - self.start_time), 2)}")
                         item_text = (await response.text()).strip()
 
                         info = self.get_info_from_text(item_text=item_text, appid=appid, page_num=int(start/100))
@@ -370,8 +364,7 @@ class FastBot:
                         print(f'[{datetime.datetime.now()}] Слишком много запросов. Пробуем еще раз...',  proxy)
                         await asyncio.sleep(300)
                         raise Exception
-                    else:
-                        print('RESPONSE STATUS', response.status)
+
 
                     if info:
                         if len(common_skins_info | info['skins_info']) == len(common_skins_info):
@@ -380,7 +373,7 @@ class FastBot:
                             common_skins_info |= info['skins_info']
                             if 0 < len(info['skins_info']) < 100:
                                 break
-                            await asyncio.sleep(8)
+                            await asyncio.sleep(9)
                     else:
                         break
 
@@ -436,7 +429,6 @@ class FastBot:
                                         sticker_addition_price += (st_price * 0.095)
                                 
                             else:
-                                # print('В базе нет', st)
                                 await asyncio.sleep(3)
                                 response_from_sticker = await self.delayed_request(session=session,
                                                                                    url=self.convert_name_to_link(st),
@@ -485,8 +477,7 @@ class FastBot:
                                         sticker_addition_price += (st_price * 0.085)
                                     elif st_price < 10000:
                                         sticker_addition_price += (st_price * 0.095)
-                                if not st_price:
-                                    print('Почему-то не нашел цену на стикер', st, skin)
+
                             sticker_price.append([st, st_price])
 
                         link_to_found = f"{url}?filter={' '.join(sticker).replace('Sticker | ', '')}"
@@ -500,7 +491,7 @@ class FastBot:
                     profit = round(default_price_without_fee + sticker_addition_price - listing_price, 2)
                     percent = round(profit / listing_price * 100, 2)
                     ts = datetime.datetime.now()
-                    # print('ЩАС БУДУ ДОБАВЛЯТЬ', (str(buy_id), str(skin), str(id_), str(listing_price), str(default_price), str(steam_without_fee), str(sticker), str(link_to_found), str(ts), str(wear), str(sticker_slot), str(sticker_price), str(profit), str(percent)))
+                    # ('ЩАС БУДУ ДОБАВЛЯТЬ', (str(buy_id), str(skin), str(id_), str(listing_price), str(default_price), str(steam_without_fee), str(sticker), str(link_to_found), str(ts), str(wear), str(sticker_slot), str(sticker_price), str(profit), str(percent)))
                     if 'Sticker |' in str(skin) and skin not in self.stickers:
                         print(f'\r[{datetime.datetime.now()}] Выгружаю стикеры в бд...', end='', flush=True)
 
@@ -511,13 +502,13 @@ class FastBot:
                         print(f'\r[{datetime.datetime.now()}] Стикеры выгружены в бд', end='', flush=True)
                         self.stickers[skin] = default_price
                     elif 'Sticker |' not in str(skin):
-                        # print('MARKET ACTIONS', market_actions_link)
+                        # ('MARKET ACTIONS', market_actions_link)
                         if (percent > 0 and sticker) or (idx > int(self.len_links * divis) and percent > -10):
                             skin_lots.append((str(buy_id), str(skin), str(id_), str(listing_price), str(default_price),
                                               str(steam_without_fee), str(sticker), str(link_to_found), str(ts),
                                               str(wear), str(sticker_slot), str(sticker_price), str(profit),
                                               str(percent), str(market_actions_link), '1', page_num))
-                # print('SKIN LOTSSSS', len(skin_lots), skin_lots)
+                #('SKIN LOTSSSS', len(skin_lots), skin_lots)
                 if skin_lots:
                     print(f'\r[{datetime.datetime.now()}] Выгружаю скины в бд...', end='', flush=True)
 
@@ -537,9 +528,6 @@ class FastBot:
                 'url': url
             }
         except:
-
-            print(3)
-
             print(traceback.format_exc())
         finally:
             return info
@@ -561,6 +549,7 @@ class FastBot:
         self.len_links = int(len(self.links))
 
         async with async_db.Storage() as db:
+
             self.start_time = time.time()
             self.response_counter = 0
             self.stickers = await db.fetch_all_stickers()
@@ -585,51 +574,63 @@ class FastBot:
 
     async def ping_proxy(self, proxy):
         async with aiohttp.ClientSession() as session:
-            # print(f'Проверяю прокси {proxy.element}')
+
             async with session.get(url='https://steamcommunity.com/', proxy=proxy.element, ssl=False) as response:
-                # print(f'Проверил прокси {proxy.element}')
+
                 if response.status == 200:
                     return proxy
                 else:
                     return None
 
 
+async def analyze_data():
+    async with async_db.Storage() as db:
+        await db.analyze_all_base()
 
-
-
-
+async def insert_data():
+    async with async_db.Storage() as db:
+        await db.insert_data()
 
 while True:
+    asyncio.run(analyze_data())
+
     start_console_ts = time.time()
+
     try:
         bot = FastBot()
         with open('baza730.txt', 'r', encoding='utf-8') as file:
             baza730 = file.read().split('\n')
         with open('floats.txt', 'r', encoding='utf-8') as file:
             floats = file.read().split('\n')
+
+        floats *= 2
+
         names = list(set(baza730 + floats))
 
         client = steam_bot.steam_login()
         cookies = client._session.cookies
         step = len(bot.proxies) * 5
 
-        divis = 0.95
+        divis = 0.75
 
         while baza730:
 
             if time.time() - start_console_ts > 900:
                 os.system('cls')
                 start_console_ts = time.time()
-            
+
             pack_of_names = []
             for i in range(int(step*divis)):
                 if baza730:
                     pack_of_names.append(baza730.pop(0))
+
             for i in range(int(step - divis * divis)):
                 if floats:
                     pack_of_names.append(floats.pop(0))
+
             start = time.time()
             asyncio.run(bot.parse_items(list_of_names=pack_of_names, appid='730'))
+            print('Цикл завершился за', time.time() - start)
             time.sleep(10)
     except:
         print(traceback.format_exc())

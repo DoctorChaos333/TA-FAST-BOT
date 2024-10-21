@@ -9,7 +9,6 @@ import cloudscraper
 import fake_useragent
 import pandas as pd
 import gc
-from memory_profiler import profile
 from concurrent.futures import ThreadPoolExecutor
 
 df = pd.read_excel('База предметов.xlsx')
@@ -73,15 +72,10 @@ class HuntingParser:
             for future in futures:
                 future.result()
             executor.shutdown(wait=True)
-            for future in futures:
-                print(future.running())
-                future.cancel()
-                print(future.running())
-            del future
-            del futures
             gc.collect()
+        del executor
 
-        time.sleep(5)
+        await asyncio.sleep(5)
 
     def th_parse_floats(self, args):
         for item in args:
@@ -264,11 +258,14 @@ def main():
                 proxies.clear()
                 print('ВСЕГО ПОТОКОВ', len(proxies_pack))
                 float_parser = HuntingParser(proxies_pack)
-                loop.run_until_complete(float_parser.parse_floats())
+
+                loop.run_until_complete(future:=float_parser.parse_floats())
+                future.close()
                 float_parser.items_to_update.clear()
                 float_parser.result_thread = []
                 float_parser.items = []
                 del float_parser
+                del future
 
             else:
                 print(f'[{datetime.datetime.now()}] ПОКА НЕТ ПРЕДМЕТОВ ДЛЯ ПАРСИНГА ФЛОТОВ')
