@@ -507,7 +507,7 @@ class FastBot:
                             skin_lots.append((str(buy_id), str(skin), str(id_), str(listing_price), str(default_price),
                                               str(steam_without_fee), str(sticker), str(link_to_found), str(ts),
                                               str(wear), str(sticker_slot), str(sticker_price), str(profit),
-                                              str(percent), str(market_actions_link), '1', page_num))
+                                              str(percent), str(market_actions_link), '1', page_num, str(buy_id)))
                 #('SKIN LOTSSSS', len(skin_lots), skin_lots)
                 if skin_lots:
                     print(f'\r[{datetime.datetime.now()}] Выгружаю скины в бд...', end='', flush=True)
