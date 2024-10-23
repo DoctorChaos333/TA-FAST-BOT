@@ -131,7 +131,40 @@ class Storage:
 
     async def smthmany(self, args: list, name='spam_profit_temp'):
         if name == 'spam_profit_temp':
-            query = """INSERT INTO `spam_profit_temp` (buy_id, skin, id, listing_price, default_price, steam_without_fee, sticker, url, ts, wear, sticker_slot, sticker_price, profit, percent, market_actions, fl, page_num) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ON DUPLICATE KEY UPDATE profit=IF(profit > 0, VALUES(profit), profit), percent=IF(percent > 0, VALUES(percent), percent), ts = ts"""
+            query = """
+                INSERT INTO `spam_profit_temp` (
+                    buy_id, skin, id, listing_price, default_price, steam_without_fee, 
+                    sticker, url, ts, wear, sticker_slot, sticker_price, profit, 
+                    percent, market_actions, fl, page_num
+                )
+                SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                FROM dual
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM `spam_profit` WHERE `buy_id` = %s
+                )
+                ON DUPLICATE KEY UPDATE 
+                    profit = IF(profit > 0, VALUES(profit), profit), 
+                    percent = IF(percent > 0, VALUES(percent), percent), 
+                    ts = ts
+            """
+            await self.executemany(query, args)
+
+            query = """
+                INSERT INTO `spam_profit_temp_copy` (
+                    buy_id, skin, id, listing_price, default_price, steam_without_fee, 
+                    sticker, url, ts, wear, sticker_slot, sticker_price, profit, 
+                    percent, market_actions, fl, page_num
+                )
+                SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                FROM dual
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM `spam_profit` WHERE `buy_id` = %s
+                )
+                ON DUPLICATE KEY UPDATE 
+                    profit = IF(profit > 0, VALUES(profit), profit), 
+                    percent = IF(percent > 0, VALUES(percent), percent), 
+                    ts = ts
+            """
             await self.executemany(query, args)
         elif name == 'spam_profit':
 
