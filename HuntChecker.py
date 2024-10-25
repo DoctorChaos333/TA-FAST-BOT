@@ -94,8 +94,8 @@ class HuntingParser:
                 "Sec-Fetch-Mode": "cors",
                 "Sec-Fetch-Site": "none",
                 "User-Agent": fake_useragent.UserAgent().firefox,
-                "X-Sih-Token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjgyMzExLCJ0b2tlbiI6Ijg1OTk2ZTc5OTBmMTViZmM0YzQ1ZGQ4N2RmMjA0ZjBjYTA3YzhiOTkyYTA4NjMwZmM3Y2Y0ZDAyYjg2NjI0Mzk3NjM1ZjNmZjFjMmRjNDhmZDg5OGM4YzdiMGFhMDgyMzU0ZTBkZWZiZWUzNmEzYzQzZDE4NTU1ODM5NmM1NmE5IiwiZGF0YSI6bnVsbCwiaWF0IjoxNzI2NTgyMjc0LCJleHAiOjE3MjkxNzQyNzR9.5OFuloRm0Hw5-MZy46KJYUntYWsnLWSgjVLVSjpRV2A",
-                "X-Sih-Version": "2.1.0"
+                "X-Sih-Token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjM4MDI2LCJ0b2tlbiI6IjdkZjIwMTFkZjQ3YTI1Yjk1M2VkNzBlNTRlNjYxMjc2NTkzZTE1OTE4OTA2NjZkYTI5MDY5OTliMjgyNjQwMThmY2JjNTkyMzliMjExNzUzNzg0MTk0ZTY3NTA4MTM5ODRjMDE2ZDhhNWNlODRlMmRiMGY0N2NmNDk5NjQzMTNhIiwiZGF0YSI6bnVsbCwiaWF0IjoxNzI5MjA4NjQ4LCJleHAiOjE3MzE4MDA2NDh9.WqbYPUI2Z1Bo_8IW7l0wsp5LxCg38laeHWNwRWP24Lk",
+                "X-Sih-Version": "2.1.8"
             }
             # steam://rungame/730/76561202255233023/ csgo_econ_action_preview M5269862557101848699A39457149428D478659805249054517
             fl_url = f"https://floats.steaminventoryhelper.com/?url={link.replace('20M%', '20M').replace('%A%', 'A').replace('%D', 'D')}"

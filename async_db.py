@@ -119,15 +119,9 @@ class Storage:
                 await cur.execute(query, *args, **kwargs)
                 return await cur.fetchone()
 
-    async def smth(self, buy_id, skin, id_, listing_price, default_price, steam_without_fee, sticker, url, ts, wear, sticker_slot, sticker_price, profit, percent, fl):
-        sticker = str(sticker)
-        query = """INSERT IGNORE INTO `spam_profit_temp` (buy_id, skin, id, listing_price, default_price, steam_without_fee, sticker, url, ts, wear, sticker_slot, sticker_price, profit, percent, market_actions, fl) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
-        await self.execute(query, (str(buy_id), str(skin), str(id_), str(listing_price), str(default_price), str(steam_without_fee), str(sticker), str(url), ts, str(wear), str(sticker_slot), str(sticker_price), str(profit), str(percent), str(fl)))
-
     async def add_sticker(self, skin, default_price, ts):
         query = "INSERT INTO spam_stickers (skin, default_price, ts) VALUES (%s, %s, %s) AS alias ON DUPLICATE KEY UPDATE default_price = alias.default_price, ts = alias.ts"
         await self.execute(query, (str(skin), str(default_price), str(ts)))
-
 
     async def smthmany(self, args: list, name='spam_profit_temp'):
         if name == 'spam_profit_temp':
@@ -149,23 +143,6 @@ class Storage:
             """
             await self.executemany(query, args)
 
-            query = """
-                INSERT INTO `spam_profit_temp_copy` (
-                    buy_id, skin, id, listing_price, default_price, steam_without_fee, 
-                    sticker, url, ts, wear, sticker_slot, sticker_price, profit, 
-                    percent, market_actions, fl, page_num
-                )
-                SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-                FROM dual
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM `spam_profit` WHERE `buy_id` = %s
-                )
-                ON DUPLICATE KEY UPDATE 
-                    profit = IF(profit > 0, VALUES(profit), profit), 
-                    percent = IF(percent > 0, VALUES(percent), percent), 
-                    ts = ts
-            """
-            await self.executemany(query, args)
         elif name == 'spam_profit':
 
             if args:

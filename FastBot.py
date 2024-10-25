@@ -508,6 +508,18 @@ class FastBot:
                                               str(steam_without_fee), str(sticker), str(link_to_found), str(ts),
                                               str(wear), str(sticker_slot), str(sticker_price), str(profit),
                                               str(percent), str(market_actions_link), '1', page_num, str(buy_id)))
+                        else:
+                            if not (percent > 0):
+                                print(f"Условие не выполнено: percent > 0 (percent = {percent})")
+                            if not sticker:
+                                print(f"Условие не выполнено: sticker (sticker = {sticker})")
+
+                            if not (idx > int(self.len_links * divis)):
+                                print(
+                                    f"Условие не выполнено: idx > int(self.len_links * divis) (idx = {idx}, divis = {divis})")
+                            if not (percent > -10):
+                                print(f"Условие не выполнено: percent > -10 (percent = {percent})")
+
                 #('SKIN LOTSSSS', len(skin_lots), skin_lots)
                 if skin_lots:
                     print(f'\r[{datetime.datetime.now()}] Выгружаю скины в бд...', end='', flush=True)
