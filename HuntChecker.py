@@ -9,6 +9,9 @@ import cloudscraper
 import fake_useragent
 import pandas as pd
 import gc
+import sys
+import threading
+import importlib
 from concurrent.futures import ThreadPoolExecutor
 
 df = pd.read_excel('База предметов.xlsx')
@@ -51,34 +54,44 @@ tasks_ids = set()
 
 class HuntingParser:
     def __init__(self, items):
-        self.scraper = None
         self.result_thread = None
         self.items = items
         self.items_to_update = []
         self.update_counter = 0
-        self.loop: AbstractEventLoop = None
+        self.scraper = None
 
-    async def parse_floats(self):
+    def parse_floats(self):
 
-        self.scraper = cloudscraper.create_scraper(
-            browser={'browser': 'firefox', 'platform': 'windows', 'mobile': False})
+        with cloudscraper.create_scraper(
+            browser={'browser': 'firefox', 'platform': 'windows', 'mobile': False}) as scraper:
+            self.scraper = scraper
 
-        min_count = min([len(self.items)])
+            min_count = min([len(self.items)])
 
-        self.result_thread = [() for _ in range(min_count)]
-        
-        with ThreadPoolExecutor(max_workers=len(self.items), thread_name_prefix='___71___') as executor:
+            self.result_thread = [() for _ in range(min_count)]
+
+            threads = [threading.Thread(target=self.th_parse_floats, args=(value,)) for value in
+                       self.items]
+
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+        """with ThreadPoolExecutor(max_workers=len(self.items), thread_name_prefix='___71___') as executor:
             futures = [executor.submit(self.th_parse_floats, value) for value in self.items]
             for future in futures:
                 future.result()
             executor.shutdown(wait=True)
-            gc.collect()
-        del executor
+            gc.collect()"""
+        #del executor
+        self.scraper = None
 
-        await asyncio.sleep(5)
+        time.sleep(5)
 
     def th_parse_floats(self, args):
         for item in args:
+            gc.collect()
             link = item['market_actions']
             headers = {
                 "authority": "floats.steaminventoryhelper.com",
@@ -186,10 +199,8 @@ class HuntingParser:
                             self.update_counter = 0
                             temp_items = self.items_to_update.copy()
                             self.items_to_update = []
-                            new_loop = asyncio.new_event_loop()
-                            new_loop.run_until_complete(update_base(temp_items))
-                            new_loop.close()
-                            pass
+                            asyncio.run(update_base(temp_items))
+                            time.sleep(0.3)
                             #del new_loop
                         else:
                             self.update_counter += 1
@@ -197,6 +208,7 @@ class HuntingParser:
                         print('NOT SUCCESS')
                 else:
                     print(response.status_code, proxy)
+        gc.collect()
         if args:
             del item
             del response
@@ -204,6 +216,8 @@ class HuntingParser:
             del item_info
             del float_value
             del stickers
+            del buy_id
+            del args
 
 async def fetch_hunt_temp():
     async with async_db.Storage() as db:
@@ -221,14 +235,16 @@ def main():
     tracemalloc.start()
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+    old_modules = sys.modules.copy()
+
 
     while True:
         gc.collect()
-        snapshot = tracemalloc.take_snapshot()  # Снимок состояния памяти
-        top_stats = snapshot.statistics('lineno')  # Статистика по строкам кода
+        #snapshot = tracemalloc.take_snapshot()  # Снимок состояния памяти
+        #top_stats = snapshot.statistics('lineno')  # Статистика по строкам кода
         #print(top_stats[:10])
-        line = '\n'.join(str(i) for i in top_stats[:10])
-        print(f'\r{line}', end='', flush=True)
+        #line = '\n'.join(str(i) for i in top_stats[:10])
+        #print(f'\r{line}', end='', flush=True)
         gc.collect()
         time.sleep(1)
         items = loop.run_until_complete(fetch_hunt_temp())
@@ -253,19 +269,19 @@ def main():
             del j
 
         try:
+
             if items and proxies:
                 items.clear()
                 proxies.clear()
                 print('ВСЕГО ПОТОКОВ', len(proxies_pack))
                 float_parser = HuntingParser(proxies_pack)
 
-                loop.run_until_complete(future:=float_parser.parse_floats())
-                future.close()
+                float_parser.parse_floats()
+
                 float_parser.items_to_update.clear()
                 float_parser.result_thread = []
                 float_parser.items = []
                 del float_parser
-                del future
 
             else:
                 print(f'[{datetime.datetime.now()}] ПОКА НЕТ ПРЕДМЕТОВ ДЛЯ ПАРСИНГА ФЛОТОВ')
@@ -276,10 +292,14 @@ def main():
             del new_items_values
             del proxies_pack
             gc.collect()
+            new_modules = sys.modules.copy()
+            for key in new_modules:
+                if not key in old_modules:
+                    del sys.modules[key]
+
         except:
             print(traceback.format_exc())
             time.sleep(10)
-
 
 if __name__ == '__main__':
     main()
