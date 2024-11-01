@@ -15,7 +15,8 @@ import async_db
 import steam_currencies
 from async_db import *
 common_start = time.time()
-
+from dateutil import parser
+from decimal import Decimal
 from steampy.client import SteamClient
 import pickle
 import traceback
@@ -162,17 +163,11 @@ class FastBot:
             "2046": "HUF", "2047": "RON"
         }
 
-        # Инициализация, запись начальных логов
-        asyncio.run(self.log("FastBot", None, "Инициализация FastBot начата"))
-
         # Загрузка прокси
         with open('proxies.txt', 'r', encoding='utf-8') as file:
             self.proxies = [
                 Element('http://' + line.strip().split(':')[2] + ':' + line.strip().split(':')[3] + '@' +
                         line.strip().split(':')[0] + ':' + line.strip().split(':')[1]) for line in file.readlines()]
-
-        # Логирование загруженных прокси
-        asyncio.run(self.log("FastBot", None, f"Загружено {len(self.proxies)} прокси"))
 
         self.responses = {proxy.element: [] for proxy in self.proxies}
         self.ts = []
@@ -183,134 +178,179 @@ class FastBot:
         self.start_time = time.time()
         self.currency_converter = None
 
-        # Лог завершения инициализации
-        asyncio.run(self.log("FastBot", None, "Инициализация FastBot завершена"))
+    async def async_init(self):
+        """Асинхронный метод для инициализации логов и других асинхронных задач."""
+        await self.log("FastBot", None, "Инициализация FastBot начата")
+        await self.log("FastBot", None, f"Загружено {len(self.proxies)} прокси")
+        await self.log("FastBot", None, "Инициализация FastBot завершена")
 
     async def log(self, item, proxy_used, message):
         """Асинхронная функция для записи лога."""
         async with async_db.Storage() as db:
             await db.add_log_entry(item, proxy_used, message)
 
-    def convert_name_to_link(self, name: str, appid: str = '730'):
+    async def convert_name_to_link(self, name: str, appid: str = '730'):
         url = name.replace(' ', '%20').replace('#', '%23').replace(',', '%2C').replace('|', '%7C')
         link = f"https://steamcommunity.com/market/listings/{appid}/{url}"
 
-        # Лог конвертации имени в ссылку
-        asyncio.run(self.log("convert_name_to_link", None, f"Ссылка на {name}: {link}"))
+        # Используем await для асинхронного вызова log
+        await self.log("convert_name_to_link", None, f"Ссылка на {name}: {link}")
 
         return link
 
-    def get_info_from_text(self, item_text: str, appid='730', time_=604800, page_num=0) -> dict:
-        """Принимает текст страницы, возвращает все данные о нем на ТП."""
+    async def get_info_from_text(self, item_text: str, appid='730', time_=604800, page_num=0) -> dict:
+        """Принимает текст страницы, возвращает все данные о нем на ТП"""
+
         data = {
             'history': None,
             'skins_info': None
         }
 
+        # Предполагается, что proxy доступен как атрибут self
+        proxy = getattr(self, 'proxy', None)
+
+        # Начало обработки
+        await self.log("delayed_request", proxy, "Начало обработки текста страницы.")
+
         assets_line = re.search(r'var g_rgAssets = (.+);', item_text)
+
         try:
             if assets_line and json.loads(assets_line.group(1)):
                 assets = json.loads(assets_line.group(1))[appid]['2']
+                await self.log("delayed_request", proxy, f"Assets успешно извлечены: {len(assets)} активов.")
             else:
-                asyncio.run(self.log("get_info_from_text", None, "Нет данных о грабле"))
+                await self.log("delayed_request", proxy, "Assets не найдены или пусты.")
                 return {}
 
             listing_info_line = re.search(r'var g_rgListingInfo = (.+);', item_text)
             item_nameid_line = re.search(r'Market_LoadOrderSpread\( (.+?) \);', item_text)
-            item_nameid = item_nameid_line.group(1)
 
-            asyncio.run(self.log("get_info_from_text", None, f"ID предмета: {item_nameid}"))
+            if not listing_info_line or not item_nameid_line:
+                await self.log("delayed_request", proxy, "Не удалось найти listing_info_line или item_nameid_line.")
+                return {}
+
+            listing_info = json.loads(listing_info_line.group(1))
+            item_nameid = item_nameid_line.group(1)
+            await self.log("delayed_request", proxy, "Listing info и item_nameid успешно извлечены.")
 
         except Exception as e:
-            asyncio.run(self.log("get_info_from_text", None, f"Ошибка извлечения данных: {traceback.format_exc()}"))
+            await self.log("delayed_request", proxy, f"Ошибка при извлечении assets или listing_info: {e}")
             return {}
 
         history_line = re.search(r'var line1=(.+);', item_text)
         if history_line:
-            history = tuple(
-                [(datetime.datetime.strptime(i[0], '%b %d %Y %H:%M:%S').timestamp(), i[1], int(i[2])) for i in
-                 json.loads(history_line.group(1)) if
-                 datetime.datetime.now().timestamp() - datetime.datetime.strptime(i[0],
-                                                                                  '%b %d %Y %H:%M:%S').timestamp() < time_])
-            data['history'] = history
-
-            asyncio.run(self.log("get_info_from_text", None, f"Извлечена история, записей: {len(history)}"))
+            try:
+                history = tuple(
+                    [
+                        (
+                            datetime.datetime.strptime(i[0], '%b %d %Y %H: +%S').timestamp(),
+                            i[1],
+                            int(i[2])
+                        ) for i in json.loads(history_line.group(1))
+                        if datetime.datetime.now().timestamp() - datetime.datetime.strptime(i[0],
+                                                                                            '%b %d %Y %H: +%S').timestamp() < time_
+                    ]
+                )
+                data['history'] = history
+                await self.log("delayed_request", proxy, f"История успешно обработана: {len(history)} записей.")
+            except Exception as e:
+                await self.log("delayed_request", proxy, f"Ошибка при обработке истории: {e}")
 
         if listing_info_line:
-            listing_info = json.loads(listing_info_line.group(1))
-            data['skins_info'] = {}
-            default_price = math.inf
-            default_price_without_fee = math.inf
+            try:
+                data['skins_info'] = {}
+                default_price = math.inf
+                default_price_without_fee = math.inf
 
-            for idx, (listing_id, value) in enumerate(listing_info.items()):
-                if idx > min(len(listing_info), 100):
-                    break
+                for idx, (listing_id, value) in enumerate(listing_info.items()):
+                    if idx > min(len(listing_info), 100):
+                        await self.log("delayed_request", proxy, "Достигнут лимит в 100 лотов.")
+                        break
 
-                currencyid = self.currencies[str(value['currencyid'])]
-                amount = int(value['asset']['amount'])
-                market_actions = value['asset'].get('market_actions')
-                asset_id = value['asset']['id']
-                fee = value['fee']
-                price = value['price'] + fee
-                rub_price = round(self.currency_converter['RUB'] * price / self.currency_converter[currencyid] / 100, 2)
-                steam_without_fee = round(
-                    self.currency_converter['RUB'] * value['price'] / self.currency_converter[currencyid] / 100, 2)
+                    currencyid = self.currencies[str(value['currencyid'])]
+                    amount = int(value['asset']['amount'])
+                    market_actions = value['asset'].get('market_actions')
+                    asset_id = value['asset']['id']
+                    fee = value['fee']
+                    price = value['price'] + fee
+                    rub_price = round(
+                        self.currency_converter['RUB'] * price / self.currency_converter[currencyid] / 100, 2)
+                    steam_without_fee = round(
+                        self.currency_converter['RUB'] * value['price'] / self.currency_converter[currencyid] / 100, 2
+                    )
+                    if rub_price < default_price:
+                        default_price = rub_price
+                        default_price_without_fee = steam_without_fee
 
-                if rub_price < default_price:
-                    default_price = rub_price
-                    default_price_without_fee = steam_without_fee
+                    if market_actions:
+                        link = market_actions.pop()['link'].replace('listingid', listing_id).replace('assetid',
+                                                                                                     asset_id)
+                    else:
+                        link = None
+                    sticker_value = assets[asset_id]['descriptions'][-1]['value']
 
-                link = market_actions.pop()['link'].replace('listingid', listing_id).replace('assetid',
-                                                                                             asset_id) if market_actions else None
-                sticker_value = assets[asset_id]['descriptions'][-1]['value']
+                    if amount:
+                        data['skins_info'][listing_id] = {
+                            'listingid': listing_id,
+                            'assetid': asset_id,
+                            'currencyid': currencyid,
+                            'price': rub_price,
+                            'default_price': default_price,
+                            'default_price_without_fee': default_price_without_fee,
+                            'link': link,
+                            'stickers': [],
+                            'item_nameid': item_nameid,
+                            'steam_without_fee': steam_without_fee,
+                            'page_num': page_num
+                        }
 
-                if amount:
-                    data['skins_info'][listing_id] = {
-                        'listingid': listing_id,
-                        'assetid': asset_id,
-                        'currencyid': currencyid,
-                        'price': rub_price,
-                        'default_price': default_price,
-                        'default_price_without_fee': default_price_without_fee,
-                        'link': link,
-                        'stickers': [],
-                        'item_nameid': item_nameid,
-                        'steam_without_fee': steam_without_fee,
-                        'page_num': page_num
-                    }
+                        if sticker_value != ' ':
 
-                    asyncio.run(self.log("get_info_from_text", None, f"Добавлен скин: {listing_id}"))
+                            special_stickers = [
+                                'Run T,$$$ Run',
+                                'Run CT,$$$ Run',
+                                "Don't Worry,$$$ I'm Pro",
+                                'Hi,$$$ My Game Is',
+                                'Rock,$$$ Paper,$$$ Scissors'
+                            ]
 
-                    if sticker_value != ' ':
-                        special_stickers = [
-                            'Run T,$$$ Run', 'Run CT,$$$ Run', "Don't Worry,$$$ I'm Pro", 'Hi,$$$ My Game Is',
-                            'Rock,$$$ Paper,$$$ Scissors'
-                        ]
-                        pattern = r"<br>Sticker: (.+?)<"
-                        if re.search(pattern, sticker_value):
-                            line = list(re.search(pattern, sticker_value).group(1))
-                            count_of_brackets = 1
-                            for ch in range(len(line)):
-                                if line[ch] == '(':
-                                    count_of_brackets -= 1
-                                elif line[ch] == ')':
-                                    count_of_brackets += 1
-                                if count_of_brackets and line[ch] == ',':
-                                    line[ch] = ',$$$'
-                            if line:
-                                raw_stickers = ''.join(line)
-                                for sp_st in special_stickers:
-                                    raw_stickers = raw_stickers.replace(sp_st, sp_st.replace('$$$', ''))
-                                stickers = list(map(lambda name: 'Sticker | ' + name, raw_stickers.split(',$$$ ')))
-                                data['skins_info'][listing_id]['stickers'] = stickers
+                            pattern = r"<br>Sticker: (.+?)<"
+                            if re.search(pattern, sticker_value):
 
-                                asyncio.run(self.log("get_info_from_text", None, f"Добавлены стикеры для {listing_id}"))
+                                line = list(re.search(pattern, sticker_value).group(1))
+
+                                count_of_brackets = 1
+                                for ch in range(len(line)):
+                                    if line[ch] == '(':
+                                        count_of_brackets -= 1
+                                    elif line[ch] == ')':
+                                        count_of_brackets += 1
+                                    if count_of_brackets and line[ch] == ',':
+                                        line[ch] = ',$$$'
+                                if line:
+                                    raw_stickers = ''.join(line)
+                                    for sp_st in special_stickers:
+                                        raw_stickers = raw_stickers.replace(sp_st, sp_st.replace('$$$', ''))
+                                    stickers = list(map(lambda name: 'Sticker | ' + name, raw_stickers.split(',$$$ ')))
+
+                                    data['skins_info'][listing_id]['stickers'] = stickers
+
+                await self.log("delayed_request", proxy,
+                               f"skins_info успешно обработаны: {len(data['skins_info'])} записей.")
+            except Exception as e:
+                await self.log("delayed_request", proxy, f"Ошибка при обработке skins_info: {e}")
+
+        await self.log(
+            "delayed_request",
+            proxy,
+            f"Запрос успешен, данные извлечены: {len(data.get('skins_info', {}))} записей."
+        )
 
         return data
 
     async def fetch_item(self, session: aiohttp.ClientSession, url_el: Element, proxy: str, idx: int,
                          appid: str = '730', db_connection=None, sticker=False):
-        url = self.convert_name_to_link(url_el.element, appid)
+        url = await self.convert_name_to_link(url_el.element, appid)
         headers = {
             "User-Agent": fake_useragent.UserAgent().random,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
@@ -330,10 +370,9 @@ class FastBot:
         t1 = random.randint(8900, 9000) / 1000 * (idx // len(self.proxies))
         await self.delayed_request(session, url, headers, params, proxy, db_connection, t1, url_el, idx, appid)
 
-
-    async def delayed_request(self, session, url, headers, params, proxy, db_connection, t1, url_el, idx, appid, max_parse=300):
-        # Задержка перед запросом
-        await asyncio.sleep(t1)
+    async def delayed_request(self, session, url, headers, params, proxy, db_connection, t1, url_el, idx, appid,
+                              max_parse=300):
+        await asyncio.sleep(t1)  # Задержка перед выполнением запроса
         await self.log("delayed_request", proxy, f"Задержка перед запросом {t1} секунд для {url}")
 
         info = {'code': 429, 'info': {}, 'url': url}
@@ -347,10 +386,11 @@ class FastBot:
                 async with session.get(url=url, headers=headers, params=params, proxy=proxy, ssl=True) as response:
                     if response.status == 200:
                         item_text = (await response.text()).strip()
-                        info = self.get_info_from_text(item_text=item_text, appid=appid, page_num=int(start / 100))
+                        info = await self.get_info_from_text(item_text=item_text, appid=appid,
+                                                             page_num=int(start / 100))
                         self.stop_parsing = False
-                        await self.log("delayed_request", proxy, f"Запрос успешен, данные извлечены: {len(info)} записей")
-
+                        await self.log("delayed_request", proxy,
+                                       f"Запрос успешен, данные извлечены: {len(info)} записей")
                     elif response.status == 429:
                         await self.log("delayed_request", proxy, "Слишком много запросов, повтор через 300 секунд")
                         await asyncio.sleep(300)
@@ -367,7 +407,6 @@ class FastBot:
                     else:
                         break
 
-            # Завершение цикла запросов, сохраняем информацию
             info = common_skins_info
             await self.log("delayed_request", proxy, f"Общий сбор данных завершен, всего записей: {len(info)}")
 
@@ -389,64 +428,84 @@ class FastBot:
                     listing_price = v['price']
                     page_num = v['page_num']
                     steam_without_fee = v['steam_without_fee']
-                    sticker_price, wear, sticker_slot = [], [], []
+                    wear = []
+                    sticker_slot = []
+                    sticker_price = []
                     sticker_addition_price = 0
 
-                    # Логика обработки стикеров
-                    for st in sticker:
-                        st_price = self.stickers.get(st, 0)
-                        if st in self.stickers:
-                            # Логика добавления наценки по стикерам
-                            if sticker.count(st) == 2:
-                                sticker_addition_price += st_price * 0.2
-                            elif sticker.count(st) == 3:
-                                sticker_addition_price += st_price * 0.25
-                            elif sticker.count(st) >= 4:
-                                sticker_addition_price += st_price * 0.3
-                            elif sticker.count(st) == 1:
-                                sticker_addition_price += st_price * (0.045 if st_price > 30000 else 0.085 if st_price > 10000 else 0.095)
-                        else:
-                            # Вызов дополнительного запроса, если цена стикера неизвестна
-                            await asyncio.sleep(3)
-                            response_from_sticker = await self.delayed_request(session=session,
-                                                                               url=self.convert_name_to_link(st),
-                                                                               headers=headers,
-                                                                               params=params,
-                                                                               proxy=proxy,
-                                                                               db_connection=db_connection,
-                                                                               t1=7,
-                                                                               url_el=url_el,
-                                                                               idx=1,
-                                                                               appid=appid,
-                                                                               max_parse=100)
+                    if sticker:
+                        for st in sticker:
+                            st_price = self.stickers.get(st, 0)
+                            if st in self.stickers:
+                                # Добавляем наценку для различных случаев количества стикеров
+                                if sticker.count(st) == 2:
+                                    sticker_addition_price += st_price * 0.2
+                                elif sticker.count(st) == 3:
+                                    sticker_addition_price += st_price * 0.25
+                                elif sticker.count(st) >= 4:
+                                    sticker_addition_price += st_price * 0.3
+                                elif sticker.count(st) == 1:
+                                    if st_price > 30000:
+                                        sticker_addition_price += st_price * 0.045
+                                    elif 10000 < st_price <= 30000:
+                                        sticker_addition_price += st_price * 0.085
+                                    else:
+                                        sticker_addition_price += st_price * 0.095
+                            else:
+                                await asyncio.sleep(3)
+                                response_from_sticker = await self.delayed_request(
+                                    session=session,
+                                    url=await self.convert_name_to_link(st),
+                                    headers=headers,
+                                    params=params,
+                                    proxy=proxy,
+                                    db_connection=db_connection,
+                                    t1=7,
+                                    url_el=url_el,
+                                    idx=1,
+                                    appid=appid,
+                                    max_parse=100
+                                )
 
-                            # Добавление в словарь цен и обновление в базе данных
-                            st_price = response_from_sticker['info'].get('default_price', 0)
-                            if st_price:
-                                self.stickers[st] = st_price
-                                await self.log("delayed_request", proxy, f"Цена стикера {st}: {st_price}")
+                                st_price = response_from_sticker['info'].get('default_price', 0)
+                                if st_price:
+                                    self.stickers[st] = st_price
+                                    await self.log("delayed_request", proxy, f"Цена стикера {st}: {st_price}")
 
-                    # Вычисление итоговой стоимости и доходности с учетом стикеров
+                            # Добавляем стикер и его цену в соответствующие списки
+                            sticker_price.append([st, st_price])
+                            wear.append([st, 0])  # Пример значений для wear, нужно настроить по специфике данных
+                            sticker_slot.append([sticker[i], i] for i in range(len(sticker)))
+
+                    # Формируем окончательные значения и вычисления для базы данных
+                    link_to_found = f"{url}?filter={' '.join(sticker).replace('Sticker | ', '')}" if sticker else url
                     profit = round(default_price_without_fee + sticker_addition_price - listing_price, 2)
                     percent = round(profit / listing_price * 100, 2)
                     ts = datetime.datetime.now()
+                    sticker_slot = [list([sticker[i], i]) for i in range(len(sticker))]
 
-                    # Добавление в список для записи
                     if (percent > 0 and sticker) or (idx > int(len(self.links) * 0.75) and percent > -10):
-                        skin_lots.append((buy_id, skin, id_, listing_price, default_price, steam_without_fee, sticker, url, ts, wear, sticker_slot, sticker_price, profit, percent, market_actions_link, 1, page_num, buy_id))
+                        skin_lots.append((
+                            buy_id, skin, id_, listing_price, default_price, steam_without_fee,
+                            json.dumps(sticker), link_to_found, ts, wear, sticker_slot, sticker_price,
+                            float(f"{profit:.2f}"), float(f"{percent:.2f}"), market_actions_link, 1, page_num
+                        ))
 
                 if skin_lots:
-                    await db_connection.smthmany(skin_lots)
+                    await self.log("delayed_request", proxy,
+                                   f"Скины подготовлены для базы, всего: {len(skin_lots)} записей")
+                    async with async_db.Storage() as db:
+                        await db.smthmany(skin_lots)
                     await self.log("delayed_request", proxy, f"Скины выгружены в базу, всего: {len(skin_lots)} записей")
 
             info = {'code': response.status, 'info': info, 'url': url}
+
         except Exception as e:
             await self.log("delayed_request", proxy, f"Ошибка при выполнении запроса: {traceback.format_exc()}")
         finally:
             return info
 
-
-    async def parse_items(self, list_of_names: list, appid: str):
+    async def parse_items(self, list_of_names: list, appid: str, cookies):
         async with async_db.Storage() as db:
             await db.add_log_entry("parse_items_start", None, f"Начало parse_items для {len(list_of_names)} имен")
 
@@ -484,7 +543,8 @@ class FastBot:
         # Логирование начала работы
         self.start_time = time.time()
         self.response_counter = 0
-        self.stickers = await db.fetch_all_stickers()
+        async with async_db.Storage() as db:
+            self.stickers = await db.fetch_all_stickers()
         async with async_db.Storage() as db:
             await db.add_log_entry("sticker_fetch", None, f"Получены стикеры: {len(self.stickers)}")
 
@@ -502,7 +562,7 @@ class FastBot:
 
             for idx, link in enumerate(self.links):
                 proxy = self.proxies[idx % len(self.proxies)].element
-                tasks.append(asyncio.create_task(self.fetch_item(session, link, proxy, idx, db_connection=db)))
+                tasks.append(asyncio.create_task(self.fetch_item(session, link, proxy, idx)))
                 async with async_db.Storage() as db:
                     await db.add_log_entry("fetch_task_creation", proxy,
                                            f"Создана задача fetch_item для {link.element}")
@@ -541,9 +601,9 @@ async def insert_data():
 
 async def main():
     while True:
-        async with async_db.Storage() as db:
-            await db.add_log_entry("analyze_data", None, "Запуск analyze_data()")
-        await analyze_data()
+        # async with async_db.Storage() as db:
+        #     await db.add_log_entry("analyze_data", None, "Запуск analyze_data()")
+        # await analyze_data()
 
         start_console_ts = time.time()
         async with async_db.Storage() as db:
@@ -555,6 +615,7 @@ async def main():
                 await db.add_log_entry("init", None, "Инициализация FastBot и SteamBot")
 
             bot = FastBot()
+            await bot.async_init()
             with open('baza730.txt', 'r', encoding='utf-8') as file:
                 baza730 = file.read().split('\n')
             async with async_db.Storage() as db:
@@ -573,7 +634,7 @@ async def main():
                 await db.add_log_entry("data_combination", None,
                                        f"Сформирован список names, уникальных элементов: {len(names)}")
 
-            client = steam_bot.steam_login()
+            client = await steam_bot.steam_login()
             async with async_db.Storage() as db:
                 await db.add_log_entry("steam_login", None, "Вход в Steam выполнен")
 
@@ -610,7 +671,7 @@ async def main():
                 async with async_db.Storage() as db:
                     await db.add_log_entry("parse_items_start", None,
                                            f"Запуск parse_items для {len(pack_of_names)} имен")
-                await bot.parse_items(list_of_names=pack_of_names, appid='730')
+                await bot.parse_items(list_of_names=pack_of_names, appid='730', cookies=cookies)
                 end = time.time()
 
                 async with async_db.Storage() as db:
