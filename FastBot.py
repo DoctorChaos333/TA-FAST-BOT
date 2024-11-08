@@ -215,11 +215,21 @@ class FastBot:
         assets_line = re.search(r'var g_rgAssets = (.+);', item_text)
 
         try:
-            if assets_line and json.loads(assets_line.group(1)):
-                assets = json.loads(assets_line.group(1))[appid]['2']
-                await self.log("delayed_request", proxy, f"Assets успешно извлечены: {len(assets)} активов.")
+            if assets_line:
+                assets_json = json.loads(assets_line.group(1))
+                # Логируем, чтобы увидеть текущую структуру данных
+                await self.log("delayed_request", proxy,
+                               f"Содержимое assets_json (первые 500 символов): {json.dumps(assets_json)[:500]}")
+
+                if isinstance(assets_json, dict) and appid in assets_json and '2' in assets_json[appid]:
+                    assets = assets_json[appid]['2']
+                    await self.log("delayed_request", proxy, f"Assets успешно извлечены: {len(assets)} активов.")
+                else:
+                    await self.log("delayed_request", proxy,
+                                   "Assets не найдены или структура не соответствует ожиданиям.")
+                    return {}
             else:
-                await self.log("delayed_request", proxy, "Assets не найдены или пусты.")
+                await self.log("delayed_request", proxy, "Assets не найдены.")
                 return {}
 
             listing_info_line = re.search(r'var g_rgListingInfo = (.+);', item_text)
@@ -234,7 +244,8 @@ class FastBot:
             await self.log("delayed_request", proxy, "Listing info и item_nameid успешно извлечены.")
 
         except Exception as e:
-            await self.log("delayed_request", proxy, f"Ошибка при извлечении assets или listing_info: {e}")
+            error_message = f"Ошибка при извлечении assets или listing_info: {e}\n{traceback.format_exc()}"
+            await self.log("delayed_request", proxy, error_message)
             return {}
 
         history_line = re.search(r'var line1=(.+);', item_text)
@@ -485,15 +496,15 @@ class FastBot:
                     sticker_slot = [list([sticker[i], i]) for i in range(len(sticker))]
 
                     if (percent > 0 and sticker) or (idx > int(len(self.links) * 0.75) and percent > -10):
-                        skin_lots.append((
-                            buy_id, skin, id_, listing_price, default_price, steam_without_fee,
-                            json.dumps(sticker), link_to_found, ts, wear, sticker_slot, sticker_price,
-                            float(f"{profit:.2f}"), float(f"{percent:.2f}"), market_actions_link, 1, page_num
-                        ))
+                        skin_lots.append((str(buy_id), str(skin), str(id_), str(listing_price), str(default_price),
+                                          str(steam_without_fee), str(sticker), str(link_to_found), str(ts),
+                                          str(wear), str(sticker_slot), str(sticker_price), str(profit),
+                                          str(percent), str(market_actions_link), '1', page_num))
 
                 if skin_lots:
                     await self.log("delayed_request", proxy,
                                    f"Скины подготовлены для базы, всего: {len(skin_lots)} записей")
+                    await self.log("delayed_request", proxy, f"Что грузим: {skin_lots}")
                     async with async_db.Storage() as db:
                         await db.smthmany(skin_lots)
                     await self.log("delayed_request", proxy, f"Скины выгружены в базу, всего: {len(skin_lots)} записей")
