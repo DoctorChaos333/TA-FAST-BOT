@@ -639,7 +639,7 @@ async def main():
 
             floats *= 2
 
-            names = list(set(baza730 + floats))
+            names = list(set(baza730))
 
             async with async_db.Storage() as db:
                 await db.add_log_entry("data_combination", None,
