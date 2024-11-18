@@ -337,6 +337,7 @@ class FastBot:
         }
         common_skins_info = dict()
         default_price, fee = await db.get_default_price(account_id)
+        #print('Нашел default_price', default_price, fee, account_id)
 
         if type(default_price) == int and type(fee) == int:
             default_price = default_price
@@ -344,6 +345,8 @@ class FastBot:
         else:
             default_price = math.inf
             default_price_without_fee = math.inf
+
+        #print('Default_price_without_fee', default_price_without_fee, account_id)
 
         old_info = None
         info0_counter = 0
@@ -362,8 +365,10 @@ class FastBot:
                     session.cookie_jar.update_cookies(self.cookies[login]['cookie'])
                     async with session.get(url=url, headers=headers, params=params, proxy=proxy, ssl=True) as response:
                         if response.status == 200:
+                            print('RESPONSE = 200')
                             item_text = (await response.text()).strip()
                             info = self.get_info_from_text(item_text=item_text, appid=appid, page_num=int(start/100))
+
 
                             self.stop_parsing = False
                         elif response.status == 429:
@@ -371,7 +376,7 @@ class FastBot:
                             await asyncio.sleep(300)
                             raise Exception
                         else:
-                            print('RESPONSE STATUS', response.status)
+                            print('\nRESPONSE STATUS', response.status)
 
                         if info and response.status == 200:
                             if len(common_skins_info | info['skins_info']) == len(common_skins_info):
@@ -396,7 +401,10 @@ class FastBot:
                                         sticker = v['stickers']
                                         page_num = v['page_num']
                                         wear = [[st, 0] for st in sticker]
-                                        percent = int(100 * listing_price / default_price_without_fee - 100)
+                                        if default_price != listing_price:
+                                            percent = int(100 * listing_price / default_price_without_fee - 100)
+                                        else:
+                                            percent = 0
                                         ts = datetime.datetime.now()
 
                                         skin = skin
@@ -407,6 +415,11 @@ class FastBot:
                                                                     default_price, str(sticker), str(wear), account_id,
                                                                     buy_id, ts, page_num, fee))
                                             self.floats.append(int(id_))
+                                        elif int(id_) in self.floats:
+                                            print(f'Предмет {buy_id} уже есть в базе')
+                                        elif percent < max_percent:
+                                            print(f"Процент {buy_id} выше максимального:", percent, max_percent)
+
 
                                     if needed_to_parse:
                                         print(f'\r[{datetime.datetime.now()}] Выгружаю скины в базу {len(needed_to_parse)} скинов...')
@@ -415,14 +428,16 @@ class FastBot:
                                         break
                                     if 0 < len(info) < 100:
                                         break
+                                else:
+                                    print('NOT INFO', 428)
                                 await asyncio.sleep(12)
                         elif not info:
-                            print('NOT INFO', start, url)
+                            print('\nNOT INFO', start, url)
                             info0_counter += 1
                             if info0_counter > max_parse / 200:
                                 break
                         elif response.status != 200:
-                            print('NOT RESPONSE STATUS', response.status)
+                            print('\nNOT RESPONSE STATUS', response.status)
                         else:
                             break
 

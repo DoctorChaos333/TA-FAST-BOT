@@ -107,8 +107,8 @@ class HuntingParser:
                 "Sec-Fetch-Mode": "cors",
                 "Sec-Fetch-Site": "none",
                 "User-Agent": fake_useragent.UserAgent().firefox,
-                "X-Sih-Token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjM4MDI2LCJ0b2tlbiI6IjdkZjIwMTFkZjQ3YTI1Yjk1M2VkNzBlNTRlNjYxMjc2NTkzZTE1OTE4OTA2NjZkYTI5MDY5OTliMjgyNjQwMThmY2JjNTkyMzliMjExNzUzNzg0MTk0ZTY3NTA4MTM5ODRjMDE2ZDhhNWNlODRlMmRiMGY0N2NmNDk5NjQzMTNhIiwiZGF0YSI6bnVsbCwiaWF0IjoxNzI5MjA4NjQ4LCJleHAiOjE3MzE4MDA2NDh9.WqbYPUI2Z1Bo_8IW7l0wsp5LxCg38laeHWNwRWP24Lk",
-                "X-Sih-Version": "2.1.8"
+                "X-Sih-Token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjM4MDI2LCJ0b2tlbiI6IjdkZjIwMTFkZjQ3YTI1Yjk1M2VkNzBlNTRlNjYxMjc2NTkzZTE1OTE4OTA2NjZkYTI5MDY5OTliMjgyNjQwMThmY2JjNTkyMzliMjExNzUzNzg0MTk0ZTY3NTA4MTM5ODRjMDE2ZDhhNWNlODRlMmRiMGY0N2NmNDk5NjQzMTNhIiwiZGF0YSI6bnVsbCwiaWF0IjoxNzMxODg0MDcwLCJleHAiOjE3MzQ0NzYwNzB9.yFYLaNo1hcgnqjRdVtEhr9DE8g2N10E1uQWz1kE501c",
+                "X-Sih-Version": "2.1.13"
             }
             # steam://rungame/730/76561202255233023/ csgo_econ_action_preview M5269862557101848699A39457149428D478659805249054517
             fl_url = f"https://floats.steaminventoryhelper.com/?url={link.replace('20M%', '20M').replace('%A%', 'A').replace('%D', 'D')}"
@@ -150,8 +150,7 @@ class HuntingParser:
                         fl_url = f"https://api.csfloat.com/?url={link.replace('20M%', '20M').replace('%A%', 'A').replace('%D', 'D')}"
                         response = self.scraper.get(fl_url, proxies=proxy, headers=headers, verify=True, timeout=5)
                         print('Но нашел в CSFLOAT')
-                    except:
-                        print(traceback.format_exc())
+                    except Exception as e:
                         print('CS FLOAT тоже не нашел')
                         continue
                 if response.status_code == 200:
@@ -190,18 +189,18 @@ class HuntingParser:
                             del api_wear
                             del wear_dict
 
-                        print('Нашел float value', id_, wear, float_value)
+
                         if float_value:
                             fl = float_value
                         self.items_to_update.append([id_, wear, fl, account_id, listing_price, default_price, buy_id, page_num, is_hunting, fee])
 
-                        if len(self.items_to_update) >= len(self.items) or self.items[-1] == []:
+                        if len(self.items_to_update) or self.items[-1] == []:
                             self.update_counter = 0
                             temp_items = self.items_to_update.copy()
                             self.items_to_update = []
+                            print(f'Добавлю {len(temp_items)} скинов в базу')
                             asyncio.run(update_base(temp_items))
                             time.sleep(0.3)
-                            #del new_loop
                         else:
                             self.update_counter += 1
                     else:
@@ -210,14 +209,17 @@ class HuntingParser:
                     print(response.status_code, proxy)
         gc.collect()
         if args:
-            del item
-            del response
-            del rs_json
-            del item_info
-            del float_value
-            del stickers
-            del buy_id
-            del args
+            try:
+                del item
+                del response
+                del rs_json
+                del item_info
+                del float_value
+                del stickers
+                del buy_id
+                del args
+            except Exception as e:
+                pass
 
 async def fetch_hunt_temp():
     async with async_db.Storage() as db:
