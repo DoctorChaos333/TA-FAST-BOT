@@ -184,10 +184,10 @@ class FastBot:
         await self.log("FastBot", None, f"Загружено {len(self.proxies)} прокси")
         await self.log("FastBot", None, "Инициализация FastBot завершена")
 
-    async def log(self, item, proxy_used, message):
+    async def log(self, item, proxy_used, message, thread_id=None):
         """Асинхронная функция для записи лога."""
         async with async_db.Storage() as db:
-            await db.add_log_entry(item, proxy_used, message)
+            await db.add_log_entry(item, proxy_used, message, thread_id)
 
     async def convert_name_to_link(self, name: str, appid: str = '730'):
         url = name.replace(' ', '%20').replace('#', '%23').replace(',', '%2C').replace('|', '%7C')
@@ -198,7 +198,7 @@ class FastBot:
 
         return link
 
-    async def get_info_from_text(self, item_text: str, appid='730', time_=604800, page_num=0) -> dict:
+    async def get_info_from_text(self, item_text: str, appid='730', time_=604800, page_num=0, thread_id=None) -> dict:
         """Принимает текст страницы, возвращает все данные о нем на ТП"""
 
         data = {
@@ -219,33 +219,33 @@ class FastBot:
                 assets_json = json.loads(assets_line.group(1))
                 # Логируем, чтобы увидеть текущую структуру данных
                 await self.log("delayed_request", proxy,
-                               f"Содержимое assets_json (первые 500 символов): {json.dumps(assets_json)[:500]}")
+                               f"Содержимое assets_json (первые 500 символов): {json.dumps(assets_json)[:500]}", thread_id)
 
                 if isinstance(assets_json, dict) and appid in assets_json and '2' in assets_json[appid]:
                     assets = assets_json[appid]['2']
-                    await self.log("delayed_request", proxy, f"Assets успешно извлечены: {len(assets)} активов.")
+                    await self.log("delayed_request", proxy, f"Assets успешно извлечены: {len(assets)} активов.", thread_id)
                 else:
                     await self.log("delayed_request", proxy,
-                                   "Assets не найдены или структура не соответствует ожиданиям.")
+                                   "Assets не найдены или структура не соответствует ожиданиям.", thread_id)
                     return {}
             else:
-                await self.log("delayed_request", proxy, "Assets не найдены.")
+                await self.log("delayed_request", proxy, "Assets не найдены.", thread_id)
                 return {}
 
             listing_info_line = re.search(r'var g_rgListingInfo = (.+);', item_text)
             item_nameid_line = re.search(r'Market_LoadOrderSpread\( (.+?) \);', item_text)
 
             if not listing_info_line or not item_nameid_line:
-                await self.log("delayed_request", proxy, "Не удалось найти listing_info_line или item_nameid_line.")
+                await self.log("delayed_request", proxy, "Не удалось найти listing_info_line или item_nameid_line.", thread_id)
                 return {}
 
             listing_info = json.loads(listing_info_line.group(1))
             item_nameid = item_nameid_line.group(1)
-            await self.log("delayed_request", proxy, "Listing info и item_nameid успешно извлечены.")
+            await self.log("delayed_request", proxy, "Listing info и item_nameid успешно извлечены.", thread_id)
 
         except Exception as e:
             error_message = f"Ошибка при извлечении assets или listing_info: {e}\n{traceback.format_exc()}"
-            await self.log("delayed_request", proxy, error_message)
+            await self.log("delayed_request", proxy, error_message, thread_id)
             return {}
 
         history_line = re.search(r'var line1=(.+);', item_text)
@@ -263,9 +263,9 @@ class FastBot:
                     ]
                 )
                 data['history'] = history
-                await self.log("delayed_request", proxy, f"История успешно обработана: {len(history)} записей.")
+                await self.log("delayed_request", proxy, f"История успешно обработана: {len(history)} записей.", thread_id)
             except Exception as e:
-                await self.log("delayed_request", proxy, f"Ошибка при обработке истории: {e}")
+                await self.log("delayed_request", proxy, f"Ошибка при обработке истории: {e}", thread_id)
 
         if listing_info_line:
             try:
@@ -275,7 +275,7 @@ class FastBot:
 
                 for idx, (listing_id, value) in enumerate(listing_info.items()):
                     if idx > min(len(listing_info), 100):
-                        await self.log("delayed_request", proxy, "Достигнут лимит в 100 лотов.")
+                        await self.log("delayed_request", proxy, "Достигнут лимит в 100 лотов.", thread_id)
                         break
 
                     currencyid = self.currencies[str(value['currencyid'])]
@@ -347,20 +347,21 @@ class FastBot:
                                     data['skins_info'][listing_id]['stickers'] = stickers
 
                 await self.log("delayed_request", proxy,
-                               f"skins_info успешно обработаны: {len(data['skins_info'])} записей.")
+                               f"skins_info успешно обработаны: {len(data['skins_info'])} записей.", thread_id)
             except Exception as e:
-                await self.log("delayed_request", proxy, f"Ошибка при обработке skins_info: {e}")
+                await self.log("delayed_request", proxy, f"Ошибка при обработке skins_info: {e}", thread_id)
 
         await self.log(
             "delayed_request",
             proxy,
-            f"Запрос успешен, данные извлечены: {len(data.get('skins_info', {}))} записей."
+            f"Запрос успешен, данные извлечены: {len(data.get('skins_info', {}))} записей.", thread_id
         )
 
         return data
 
     async def fetch_item(self, session: aiohttp.ClientSession, url_el: Element, proxy: str, idx: int,
                          appid: str = '730', db_connection=None, sticker=False):
+        thread_id = url_el.element
         url = await self.convert_name_to_link(url_el.element, appid)
         headers = {
             "User-Agent": fake_useragent.UserAgent().random,
@@ -375,7 +376,7 @@ class FastBot:
         }
 
         # Лог начала выполнения fetch_item
-        await self.log("fetch_item", proxy, f"Запуск fetch_item для {url_el.element}, idx: {idx}")
+        await self.log("fetch_item", proxy, f"Запуск fetch_item для {url_el.element}, idx: {idx}", thread_id)
 
         # Независимая задержка для каждого запроса
         t1 = random.randint(8900, 9000) / 1000 * (idx // len(self.proxies))
@@ -383,14 +384,15 @@ class FastBot:
 
     async def delayed_request(self, session, url, headers, params, proxy, db_connection, t1, url_el, idx, appid,
                               max_parse=300):
+        thread_id = url_el.element
         await asyncio.sleep(t1)  # Задержка перед выполнением запроса
-        await self.log("delayed_request", proxy, f"Задержка перед запросом {t1} секунд для {url}")
+        await self.log("delayed_request", proxy, f"Задержка перед запросом {t1} секунд для {url}", thread_id)
 
         info = {'code': 429, 'info': {}, 'url': url}
         common_skins_info = {}
 
         try:
-            await self.log("delayed_request", proxy, f"Выполнение запроса {url}")
+            await self.log("delayed_request", proxy, f"Выполнение запроса {url}", thread_id)
             for start in range(0, max_parse, 100):
                 self.response_counter += 1
                 params['start'] = start
@@ -398,12 +400,12 @@ class FastBot:
                     if response.status == 200:
                         item_text = (await response.text()).strip()
                         info = await self.get_info_from_text(item_text=item_text, appid=appid,
-                                                             page_num=int(start / 100))
+                                                             page_num=int(start / 100), thread_id=thread_id)
                         self.stop_parsing = False
                         await self.log("delayed_request", proxy,
-                                       f"Запрос успешен, данные извлечены: {len(info)} записей")
+                                       f"Запрос успешен, данные извлечены: {len(info)} записей", thread_id)
                     elif response.status == 429:
-                        await self.log("delayed_request", proxy, "Слишком много запросов, повтор через 300 секунд")
+                        await self.log("delayed_request", proxy, "Слишком много запросов, повтор через 300 секунд", thread_id)
                         await asyncio.sleep(300)
                         raise Exception("Превышено количество запросов")
 
@@ -419,9 +421,14 @@ class FastBot:
                         break
 
             info = common_skins_info
-            await self.log("delayed_request", proxy, f"Общий сбор данных завершен, всего записей: {len(info)}")
+            await self.log("delayed_request", proxy, f"Общий сбор данных завершен, всего записей: {len(info)}", thread_id)
 
             if info:
+                passed_items = {
+                    'cheap_stickers': 0,
+                    'float, percent < percent' : 0,
+                    'not sticker': 0
+                }
                 default_price = math.inf
                 default_price_without_fee = math.inf
                 skin_lots = []
@@ -478,10 +485,42 @@ class FastBot:
                                     max_parse=100
                                 )
 
-                                st_price = response_from_sticker['info'].get('default_price', 0)
+                                if st in self.stickers and response_from_sticker['info']:
+                                    st_price = self.stickers[st]
+                                elif response_from_sticker['info']:
+                                    for key in response_from_sticker['info']:
+                                        st_price = response_from_sticker['info'][key]['default_price']
+                                        break
+                                    if st_price:
+                                        self.stickers[st] = st_price
+                                        dbt1 = time.time()
+                                        async with async_db.Storage() as db:
+                                            await db.add_sticker(st, st_price, datetime.datetime.now())
+                                        await self.log("delayed_request", proxy, f"Обновил цену на стикер {st}: {st_price}",
+                                                       thread_id)
+                                        dbt2 = time.time()
+                                        self.start_time += (dbt2 - dbt1) * 1.6
+
+                                st_price = float(st_price)
+
                                 if st_price:
                                     self.stickers[st] = st_price
-                                    await self.log("delayed_request", proxy, f"Цена стикера {st}: {st_price}")
+                                if sticker.count(st) == 2:
+                                    sticker_addition_price += (st_price * 0.2)
+                                elif sticker.count(st) == 3:
+                                    sticker_addition_price += (st_price * 0.25)
+                                elif sticker.count(st) >= 4:
+                                    sticker_addition_price += (st_price * 0.3)
+                                elif sticker.count(st) == 1:
+                                    if st_price > 30000:
+                                        sticker_addition_price += (st_price * 0.045)
+                                    elif 10000 < st_price < 30000:
+                                        sticker_addition_price += (st_price * 0.085)
+                                    elif st_price < 10000:
+                                        sticker_addition_price += (st_price * 0.095)
+                                else:
+                                    await self.log("delayed_request", proxy, f"Не нашел цену на {st}",
+                                                   thread_id)
 
                             # Добавляем стикер и его цену в соответствующие списки
                             sticker_price.append([st, st_price])
@@ -495,24 +534,44 @@ class FastBot:
                     ts = datetime.datetime.now()
                     sticker_slot = [list([sticker[i], i]) for i in range(len(sticker))]
 
-                    if (percent > 0 and sticker) or (idx > int(len(self.links) * 0.75) and percent > -10):
-                        skin_lots.append((str(buy_id), str(skin), str(id_), str(listing_price), str(default_price),
-                                          str(steam_without_fee), str(sticker), str(link_to_found), str(ts),
-                                          str(wear), str(sticker_slot), str(sticker_price), str(profit),
-                                          str(percent), str(market_actions_link), '1', page_num))
+                    if 'Sticker |' in str(skin) and skin not in self.stickers:
+
+
+                        dbt1 = time.time()
+                        async with async_db.Storage() as db:
+                            await db.add_sticker(skin, default_price, ts)
+                        await self.log("delayed_request", proxy, f"Добавил стикер {skin} : {default_price} в бд",
+                                       thread_id)
+                        dbt2 = time.time()
+                        self.start_time += (dbt2 - dbt1) * 1.6
+                        self.stickers[skin] = default_price
+                    elif 'Sticker |' not in str(skin):
+                        if (percent > 0 and sticker) or (idx > int(self.len_links * divis) and percent > -30):
+                            skin_lots.append((str(buy_id), str(skin), str(id_), str(listing_price), str(default_price),
+                                              str(steam_without_fee), str(sticker), str(link_to_found), str(ts),
+                                              str(wear), str(sticker_slot), str(sticker_price), str(profit),
+                                              str(percent), str(market_actions_link), '1', page_num))
+                        elif percent < 0 and sticker:
+                            passed_items['cheap_stickers'] += 1
+                        elif idx > int(self.len_links * divis) and percent > -30:
+                            passed_items['float, percent < percent'] += 1
+                        elif not sticker:
+                            passed_items['not sticker'] += 1
+                await self.log("delayed_request", proxy, f"Было: {len(info)}. Отсеял: {str(passed_items)}. Добавлю: {len(skin_lots)}",
+                               thread_id)
 
                 if skin_lots:
                     await self.log("delayed_request", proxy,
-                                   f"Скины подготовлены для базы, всего: {len(skin_lots)} записей")
-                    await self.log("delayed_request", proxy, f"Что грузим: {skin_lots}")
+                                   f"Скины подготовлены для базы, всего: {len(skin_lots)} записей", thread_id)
+                    await self.log("delayed_request", proxy, f"Что грузим: {[i[2] for i in skin_lots]}", thread_id)
                     async with async_db.Storage() as db:
                         await db.smthmany(skin_lots)
-                    await self.log("delayed_request", proxy, f"Скины выгружены в базу, всего: {len(skin_lots)} записей")
+                    await self.log("delayed_request", proxy, f"Скины выгружены в базу, всего: {len(skin_lots)} записей", thread_id)
 
             info = {'code': response.status, 'info': info, 'url': url}
 
         except Exception as e:
-            await self.log("delayed_request", proxy, f"Ошибка при выполнении запроса: {traceback.format_exc()}")
+            await self.log("delayed_request", proxy, f"Ошибка при выполнении запроса: {traceback.format_exc()}", thread_id)
         finally:
             return info
 
@@ -654,6 +713,8 @@ async def main():
                 await db.add_log_entry("session_cookies", None, "Cookies установлены для сессии")
 
             step = len(bot.proxies) * 5
+
+            global divis
             divis = 0.75
 
             while baza730:
