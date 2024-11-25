@@ -89,7 +89,8 @@ def get_info_from_text(item_text: str) -> dict:
                     data[listing_id] = {
                         'listingid': listing_id,
                         'price': converted_price,
-                        'fee': converted_fee}
+                        'fee': converted_fee
+                    }
     return data
 
 class Bot:
@@ -162,8 +163,8 @@ class Bot:
 
 
 proxy = {
-    'https': 'http://TATGoWcragRwuETA:m0sgyj@195.96.159.131:1310',
-    'http': 'http://TATGoWcragRwuETA:m0sgyj@195.96.159.131:1310,'
+    'https': 'http://TATGoWcragRwuETA:m0sgyj@172.111.130.72:2429',
+    'http': 'http://TATGoWcragRwuETA:m0sgyj@172.111.130.72:2429,'
 }
 
 async def ticket_table_checker():
@@ -186,15 +187,109 @@ async def update_ticket_status(buy_id: str, status: int):
     async with async_db.Storage() as db:
         return await db.update_ticket_status(buy_id, status)
 
+async def get_last_items(last_time: datetime.datetime) -> dict:
+    async with async_db.Storage() as db:
+        return await db.last_items(last_time)
+
+
+
+def convert_name_to_link(name: str, appid: str = '730'):
+    url = name.replace(' ', '%20').replace('#',
+                                           '%23').replace(
+        ',', '%2C').replace('|', '%7C')
+    link = f"https://steamcommunity.com/market/listings/{appid}/{url}"
+    return link
+
+def buy_ticket_item(session: SteamClient, skin, buy_id, appid='730', currency=Currency.RUB, page_num=0, is_hunting=0, price=None, fee=None):
+    url = convert_name_to_link(skin, appid)
+    params = {
+        'count': 100,
+        'start': page_num * 100
+              }
+    headers = {'User-Agent': fake_useragent.UserAgent().chrome}
+
+    for _ in range(3):
+        if is_hunting == 1:
+            try:
+                response = session.market.buy_item(
+                                                   market_name=skin,
+                                                   market_id=buy_id,
+                                                   price=price, fee=fee,
+                                                   game=GameOptions.CS,
+                                                   currency=currency
+                )
+                if response['wallet_info']['success']:
+                    asyncio.run(update_ticket_status(buy_id, 1))
+                    print('Купил предмет', buy_id)
+                    return
+                else:
+                    asyncio.run(update_ticket_status(buy_id, 0))
+            except:
+                print('Пока не удалось купить предмет', buy_id)
+                time.sleep(3)
+                continue
+    else:
+        asyncio.run(update_ticket_status(buy_id, 0))
+
+    for _ in range(3):
+        with session._session.get(url=url, headers=headers, params=params) as response:
+
+            if response.status_code == 200:
+                item_text = response.text
+                info = get_info_from_text(item_text)
+                if info:
+                    if buy_id in info:
+                        price = info[buy_id]['price']
+                        fee = info[buy_id]['fee']
+                        for i in skin, buy_id, price, fee, currency:
+                            print(i, type(i))
+                        time.sleep(3)
+                        try:
+                            response = session.market.buy_item(
+                                                    market_name=skin,
+                                                    market_id=buy_id,
+                                                    price=price+fee, fee=fee,
+                                                    game=GameOptions.CS,
+                                                    currency=currency
+                            )
+                            print('RESPONSE', response, skin, buy_id, price+fee, fee, GameOptions.CS, currency)
+                            if response['wallet_info']['success']:
+                                asyncio.run(update_ticket_status(buy_id, 1))
+                                print('Купил предмет', buy_id)
+                                return
+                            else:
+                                asyncio.run(update_ticket_status(buy_id, 0))
+                                print('RESPONSE', response, skin, buy_id, price + fee, fee, GameOptions.CS, currency)
+                        except:
+                            print('Пока не удалось купить предмет', buy_id)
+                            time.sleep(3)
+                            continue
+                    else:
+                        print('buy id not in info')
+                else:
+                    print('NOT INFO')
+            else:
+                print(response.status_code)
+    else:
+        asyncio.run(update_ticket_status(buy_id, 0))
 
 def main():
+    last_datetime = datetime.datetime.now()
     while True:
-        time.sleep(0.5)
-        new_tickets = asyncio.run(ticket_table_checker())
-        if new_tickets:
 
-            autobuy_spam_users = [u for u in asyncio.run(get_spam_users()) if u['auto_buy']]
+        new_items = [item for item in asyncio.run(get_last_items(last_datetime)) if item['buy_id']]
+        time.sleep(1)
+        last_datetime = datetime.datetime.now()
+        if new_items and False:
+            print(f'[{datetime.datetime.now()}] Новые предметы:')
+            print(*new_items, sep='\n')
+            #autobuy_spam_users = [u for u in asyncio.run(get_spam_users()) if u['auto_buy']]
+            #print(f'[{datetime.datetime.now()}] Все пользователи:')
+            #print(*autobuy_spam_users, sep='\n')
             #Список из словарей вида {'login': 'rVtRvcJbjY', 'password': '2uDzYalSPTB', 'steamID': '76561199513749651', 'shared': '3bhL51ug5dMycDbFcTlSxEOdWnw=', 'identity': 'KvZIBt1wwfPyQkBnbMJ1RVE5LH8=', 'session': None, 'API': '4510CAB674C19960D68CA6FFA50A08BB', 'last_session_ts': datetime.datetime(2024, 9, 23, 23, 23, 44), 'currency': 'KZT', 'auto_buy': 1, 'auto_buy_percent': 80, 'tariff': 299}
+
+        new_tickets = asyncio.run(ticket_table_checker())
+        if new_tickets or True:
 
 
             for ticket in new_tickets:
@@ -222,75 +317,6 @@ def main():
         else:
             print(f'\r[{datetime.datetime.now()}] Нет новых тикетов', end='', flush=True)
 
-def convert_name_to_link(name: str, appid: str = '730'):
-    url = name.replace(' ', '%20').replace('#',
-                                           '%23').replace(
-        ',', '%2C').replace('|', '%7C')
-    link = f"https://steamcommunity.com/market/listings/{appid}/{url}"
-    return link
-
-def buy_ticket_item(session: SteamClient, skin, buy_id, appid='730', currency=Currency.RUB, page_num=-1, is_hunting=0, price=None, fee=None):
-    url = convert_name_to_link(skin, appid)
-    params = {'count': 100}
-    headers = {'User-Agent': fake_useragent.UserAgent().chrome}
-    
-    for _ in range(3):
-        if is_hunting == 1:
-            try:
-                response = session.market.buy_item(market_name=skin,
-                                                   market_id=buy_id,
-                                                   price=price, fee=fee,
-                                                   game=GameOptions.CS,
-                                                   currency=currency)
-                if response['wallet_info']['success']:
-                    asyncio.run(update_ticket_status(buy_id, 1))
-                    print('Купил предмет', buy_id)
-                    return
-                else:
-                    asyncio.run(update_ticket_status(buy_id, 0))
-            except:
-                print('Пока не удалось купить предмет', buy_id)
-                time.sleep(3)
-                continue
-    else:
-        asyncio.run(update_ticket_status(buy_id, 0))
-    for _ in range(3):
-        with session._session.get(url=url, headers=headers, params=params) as response:
-            if response.status_code == 200:
-                item_text = response.text
-                info = get_info_from_text(item_text)
-                if info:
-                    if buy_id in info:
-                        price = info[buy_id]['price']
-                        fee = info[buy_id]['fee']
-                        for i in skin, buy_id, price, fee, currency:
-                            print(i, type(i))
-                        time.sleep(3)
-                        try:
-                            response = session.market.buy_item(market_name=skin,
-                                                    market_id=buy_id,
-                                                    price=price+fee, fee=fee,
-                                                    game=GameOptions.CS,
-                                                    currency=currency)
-                            if response['wallet_info']['success']:
-                                asyncio.run(update_ticket_status(buy_id, 1))
-                                print('Купил предмет', buy_id)
-                                return
-                            else:
-                                asyncio.run(update_ticket_status(buy_id, 0))
-                        except:
-                            print('Пока не удалось купить предмет', buy_id)
-                            time.sleep(3)
-                            continue
-                    else:
-                        print('buy id not in info')
-                        print(info)
-                else:
-                    print('NOT INFO')
-            else:
-                print(response.status_code)
-    else:
-        asyncio.run(update_ticket_status(buy_id, 0))
 
 if __name__ == '__main__':
     main()
