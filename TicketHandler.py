@@ -3,7 +3,7 @@ import async_db
 import asyncio
 import time
 import datetime
-
+from random import random
 from steampy.client import SteamClient
 import pickle
 import traceback
@@ -276,43 +276,79 @@ def buy_ticket_item(session: SteamClient, skin, buy_id, appid='730', currency=Cu
 def main():
     last_datetime = datetime.datetime.now()
     while True:
-
         new_items = [item for item in asyncio.run(get_last_items(last_datetime)) if item['buy_id']]
         time.sleep(1)
-        last_datetime = datetime.datetime.now()
-        if new_items and False:
-            print(f'[{datetime.datetime.now()}] Новые предметы:')
-            print(*new_items, sep='\n')
-            #autobuy_spam_users = [u for u in asyncio.run(get_spam_users()) if u['auto_buy']]
+
+        if new_items:
+            print(f'\n[{datetime.datetime.now()}] Новые предметы:')
+            print(*[[item['skin'], item['buy_id']] for item in  new_items], sep='\n')
+            autobuy_spam_users = [u for u in asyncio.run(get_spam_users()) if u['auto_buy']]
+            for item in new_items:
+                suitable_users = [acc for acc in autobuy_spam_users if acc['auto_buy_percent'] >= item['percent']]
+
+                if not suitable_users:
+                    continue
+
+                suitable_users.sort(key=lambda x: (x["tariff"], x["auto_buy_percent"]), reverse=True)
+
+                item['login'] = None
+
+                for user in suitable_users:
+                    if random() <= 0.5:
+                        item['login'] = user['login']
+                        print(f"{item['skin']} {item['buy_id']} закрепляется за {user['login']}")
+                        break
+
+                if item['login'] is None:
+                    print(f"{item['skin']} {item['buy_id']} ни за кем не закрепляется")
+
+
+
+
+            #input('Это были новые предметы')
+            #with open('tickets_ex.json', 'w', encoding='utf-8') as file:
+            #    json.dump(new_items, fp=file, indent=4)
+
             #print(f'[{datetime.datetime.now()}] Все пользователи:')
             #print(*autobuy_spam_users, sep='\n')
+            #with open('auto_buy_spam_users.json', 'w', encoding='utf-8') as file:
+            #    for user in autobuy_spam_users:
+            #        user['session'] = 1 if user['session'] else 0
+            #        user['last_session_ts'] = 0
+            #    json.dump(autobuy_spam_users, fp=file, indent=4)
+            last_datetime = datetime.datetime.now()
+            #input('Записал примеры данных')
             #Список из словарей вида {'login': 'rVtRvcJbjY', 'password': '2uDzYalSPTB', 'steamID': '76561199513749651', 'shared': '3bhL51ug5dMycDbFcTlSxEOdWnw=', 'identity': 'KvZIBt1wwfPyQkBnbMJ1RVE5LH8=', 'session': None, 'API': '4510CAB674C19960D68CA6FFA50A08BB', 'last_session_ts': datetime.datetime(2024, 9, 23, 23, 23, 44), 'currency': 'KZT', 'auto_buy': 1, 'auto_buy_percent': 80, 'tariff': 299}
-
+        else:
+            print(f'\r[{datetime.datetime.now()}] Нет новых предметов', end='', flush=True)
         new_tickets = asyncio.run(ticket_table_checker())
-        if new_tickets or True:
+        if new_tickets:
 
 
             for ticket in new_tickets:
                 print(f'\r[{datetime.datetime.now()}] Нашел новый тикет {ticket}', end='', flush=True)
-
+                buy_id = ticket['buy_id']
                 try:
                     login = ticket['steam_login']
                     user = asyncio.run(get_spam_user(login))
+                    bot = Bot(user)
+                    session = bot.steam_login()
+                    currency = user['currency']
+                    skin = ticket['skin']
+
+                    currency = eval(f"Currency.{currency}")
+                    is_hunting = ticket['is_hunting']
+                    price = ticket['price']
+                    fee = ticket['fee']
 
                     if True:
-                        bot = Bot(user)
-                        session = bot.steam_login()
-                        currency = user['currency']
-                        skin = ticket['skin']
-                        buy_id = ticket['buy_id']
-                        currency = eval(f"Currency.{currency}")
-                        is_hunting=ticket['is_hunting']
-                        price = ticket['price']
-                        fee = ticket['fee']
+
                         asyncio.run(update_ticket_status(buy_id, -1))
                         buy_ticket_item(session, skin, buy_id, appid='730', currency=currency, is_hunting=is_hunting, price=price, fee=fee)
 
                 except:
+                    print(traceback.format_exc())
+
                     asyncio.run(update_ticket_status(buy_id, 0))
         else:
             print(f'\r[{datetime.datetime.now()}] Нет новых тикетов', end='', flush=True)
