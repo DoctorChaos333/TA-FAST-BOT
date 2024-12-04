@@ -422,7 +422,7 @@ class FastBot:
 
             info = common_skins_info
             await self.log("delayed_request", proxy, f"Общий сбор данных завершен, всего записей: {len(info)}", thread_id)
-
+            skin = None
             if info:
                 passed_items = {
                     'cheap_stickers': 0,
@@ -432,6 +432,10 @@ class FastBot:
                 default_price = math.inf
                 default_price_without_fee = math.inf
                 skin_lots = []
+
+                added_to_temp = 0
+                have_stickers = 0
+
 
                 for k, v in info.items():
                     if v['default_price'] < default_price:
@@ -484,6 +488,7 @@ class FastBot:
                                     appid=appid,
                                     max_parse=100
                                 )
+                                await self.get_sticker_price(session=session, sticker_name=st, proxy=proxy)
 
                                 if st in self.stickers and response_from_sticker['info']:
                                     st_price = self.stickers[st]
@@ -546,7 +551,11 @@ class FastBot:
                         self.start_time += (dbt2 - dbt1) * 1.6
                         self.stickers[skin] = default_price
                     elif 'Sticker |' not in str(skin):
+
                         if (percent > 0 and sticker) or (idx > int(self.len_links * divis) and percent > -30):
+                            if sticker:
+                                have_stickers += 1
+                            added_to_temp += 1
                             skin_lots.append((str(buy_id), str(skin), str(id_), str(listing_price), str(default_price),
                                               str(steam_without_fee), str(sticker), str(link_to_found), str(ts),
                                               str(wear), str(sticker_slot), str(sticker_price), str(profit),
@@ -560,7 +569,12 @@ class FastBot:
                 await self.log("delayed_request", proxy, f"Было: {len(info)}. Отсеял: {str(passed_items)}. Добавлю: {len(skin_lots)}",
                                thread_id)
 
+
                 if skin_lots:
+                    if skin is not None:
+                        async with async_db.Storage() as db:
+                            await db.dump_statistics(skin=skin, added_to_temp=added_to_temp, have_stickers=have_stickers)
+
                     await self.log("delayed_request", proxy,
                                    f"Скины подготовлены для базы, всего: {len(skin_lots)} записей", thread_id)
                     await self.log("delayed_request", proxy, f"Что грузим: {[i[2] for i in skin_lots]}", thread_id)
@@ -593,7 +607,8 @@ class FastBot:
 
         # Логирование проверки прокси
         self.stop_parsing = False
-        await self.check_proxy()
+        #await self.check_proxy()
+        self.available_proxies = [proxy for proxy in self.proxies]
         async with async_db.Storage() as db:
             await db.add_log_entry("proxy_check", None,
                                    f"Проверка прокси завершена, доступных прокси: {len(self.available_proxies)}")
@@ -651,13 +666,64 @@ class FastBot:
 
     async def ping_proxy(self, proxy):
         async with aiohttp.ClientSession() as session:
-
             async with session.get(url='https://steamcommunity.com/', proxy=proxy.element, ssl=False) as response:
-
                 if response.status == 200:
                     return proxy
                 else:
                     return None
+
+    async def get_sticker_price(self, session, sticker_name, proxy):
+        await asyncio.sleep(7)
+        url = await self.convert_name_to_link(sticker_name)
+        headers = {
+            "User-Agent": fake_useragent.UserAgent().random,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+        }
+        params = {
+            'country': 'PL',
+            'appid': 730,
+            'market_hash_name': sticker_name,
+            'currency': 5
+        }
+
+        try:
+            async with session.get(url=url, headers=headers, params=params, proxy=proxy, ssl=True) as response:
+                if response.status == 200:
+                    item_text = (await response.text()).strip()
+                    history_line = re.search(r'var line1=(.+);', item_text)
+                    if history_line:
+                        try:
+                            data = json.loads(history_line.group(1))
+                            current_date = datetime.datetime.now()
+                            cutoff_date = current_date - datetime.timedelta(days=15)
+
+                            sorted_data = sorted([
+                                entry[1] for entry in data
+                                if datetime.datetime.strptime(entry[0], "%b %d %Y %H: +0") >= cutoff_date for _ in
+                                range(int(entry[2]))
+                            ])
+                            n = len(sorted_data)
+
+                            # Если количество элементов нечётное
+                            if n % 2 == 1:
+                                median = sorted_data[n // 2]
+                            else:
+                                # Если количество элементов чётное
+                                mid1 = n // 2 - 1
+                                mid2 = n // 2
+                                median = (sorted_data[mid1] + sorted_data[mid2]) / 2
+                            if median:
+                                #self.stickers[sticker_name] = median
+                                async with async_db.Storage() as db:
+                                    await db.add_sticker(sticker_name, median, datetime.datetime.now())
+                                await self.log("get_sticker_price", proxy, f"{sticker_name}: {median} RUB", -1)
+                                #return median
+                        except Exception as e:
+                            await self.log("get_sticker_price", proxy, f"Ошибка при обработке истории: {e}", -1)
+
+        except Exception as e:
+            await self.log("get_sticker_price", proxy, f"Ошибка при обработке истории: {e}", -1)
+
 
 
 async def analyze_data():

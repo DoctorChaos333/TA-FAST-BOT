@@ -136,23 +136,32 @@ class Storage:
 
     async def smthmany(self, args: list, name='spam_profit_temp'):
         if name == 'spam_profit_temp':
-            query = """
-                INSERT INTO `spam_profit_temp` (
-                    buy_id, skin, id, listing_price, default_price, steam_without_fee, 
-                    sticker, url, ts, wear, sticker_slot, sticker_price, profit, 
-                    percent, market_actions, fl, page_num
-                )
-                SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-                FROM dual
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM `spam_profit` WHERE `buy_id` = %s
-                )
-                ON DUPLICATE KEY UPDATE 
-                    profit = IF(profit > 0, VALUES(profit), profit), 
-                    percent = IF(percent > 0, VALUES(percent), percent), 
-                    ts = ts
-            """
-            await self.executemany(query, args)
+            # Основной запрос для вставки
+            insert_query = """
+                    INSERT INTO `spam_profit_temp` (
+                        buy_id, skin, id, listing_price, default_price, steam_without_fee, 
+                        sticker, url, ts, wear, sticker_slot, sticker_price, profit, 
+                        percent, market_actions, fl, page_num
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """
+
+            # Запрос для проверки существования buy_id в spam_profit
+            check_query = "SELECT 1 FROM `spam_profit` WHERE `buy_id` = %s"
+
+            for record in args:
+                # Первый элемент кортежа - это buy_id
+                buy_id = record[0]
+
+                # Проверяем, существует ли buy_id в spam_profit
+                result = await self.fetchone(check_query, (buy_id,))
+
+                # Если buy_id не найден, выполняем вставку в spam_profit_temp
+                if not result:
+                    # Используем только первые 17 значений для insert_query
+                    await self.execute(insert_query, record[:17])
+                else:
+                    print('Уже был такой итем')
 
         elif name == 'spam_profit':
 
@@ -475,9 +484,30 @@ class Storage:
         query = """INSERT IGNORE INTO `spam_profit` (buy_id, skin, id, listing_price, default_price, steam_without_fee, sticker, url, ts, wear, sticker_slot, sticker_price, profit, percent, fl, page_num) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
         await self.executemany(query, some_items)
 
-    async def add_log_entry(self, item, proxy_used, log_text):
+    async def add_log_entry(self, item, proxy_used, log_text, thread_id=None):
         query = """
-        INSERT INTO log_entries (item, proxy_used, log_text)
-        VALUES (%s, %s, %s);
+        INSERT INTO log_entries (item, proxy_used, log_text, thread_id)
+        VALUES (%s, %s, %s, %s);
         """
-        await self.execute(query, (item, proxy_used, log_text))
+        await self.execute(query, (item, proxy_used, log_text, thread_id))
+
+    async def last_items(self, last_time: datetime.datetime) -> list:
+        query = "SELECT * FROM spam_profit WHERE ts > %s;"
+        formatted_datetime = last_time.strftime('%Y-%m-%d %H:%M:%S')
+        items = await self.fetchall(query, (formatted_datetime,))
+        for item in items:
+            item['profit'] = float(item['profit'])
+            item['percent'] = float(item['percent'])
+            item['listing_price'] = float(item['listing_price'])
+            item['default_price'] = float(item['default_price'])
+            item['steam_without_fee'] = float(item['steam_without_fee'])
+            item['ts']: datetime.datetime = item['ts'].isoformat()
+        return items
+
+    async def dump_statistics(self, skin: str, added_to_temp: int, have_stickers: int):
+        query = "INSERT INTO spam_profit_statistic (skin, added_to_temp, have_stickers) VALUES (%s, %s, %s) ON DUPLICATE KEY UPDATE added_to_temp = added_to_temp + VALUES(added_to_temp), have_stickers = have_stickers + VALUES(have_stickers);"
+        await self.execute(query, (skin, added_to_temp, have_stickers))
+
+    async def dump_statistics_showed(self, data: list[str, int]):
+        query = "INSERT INTO spam_profit_statistic (skin, showed) VALUES (%s, %s) ON DUPLICATE KEY UPDATE showed = showed + VALUES(showed)"
+        await self.executemany(query, data)
