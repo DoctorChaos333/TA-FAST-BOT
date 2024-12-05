@@ -475,27 +475,25 @@ class FastBot:
                                         sticker_addition_price += st_price * 0.095
                             else:
                                 await asyncio.sleep(3)
-                                response_from_sticker = await self.delayed_request(
-                                    session=session,
-                                    url=await self.convert_name_to_link(st),
-                                    headers=headers,
-                                    params=params,
-                                    proxy=proxy,
-                                    db_connection=db_connection,
-                                    t1=7,
-                                    url_el=url_el,
-                                    idx=1,
-                                    appid=appid,
-                                    max_parse=100
-                                )
-                                await self.get_sticker_price(session=session, sticker_name=st, proxy=proxy)
+                                #response_from_sticker = await self.delayed_request(
+                                #    session=session,
+                                #    url=await self.convert_name_to_link(st),
+                                #    headers=headers,
+                                #    params=params,
+                                #    proxy=proxy,
+                                #    db_connection=db_connection,
+                                #    t1=7,
+                                #    url_el=url_el,
+                                #    idx=1,
+                                #    appid=appid,
+                                #    max_parse=100
+                                #)
+                                new_st_price = await self.get_sticker_price(session=session, sticker_name=st, proxy=proxy)
 
-                                if st in self.stickers and response_from_sticker['info']:
+                                if st in self.stickers and new_st_price:
                                     st_price = self.stickers[st]
-                                elif response_from_sticker['info']:
-                                    for key in response_from_sticker['info']:
-                                        st_price = response_from_sticker['info'][key]['default_price']
-                                        break
+                                elif new_st_price:
+                                    st_price = new_st_price
                                     if st_price:
                                         self.stickers[st] = st_price
                                         dbt1 = time.time()
@@ -540,13 +538,14 @@ class FastBot:
                     sticker_slot = [list([sticker[i], i]) for i in range(len(sticker))]
 
                     if 'Sticker |' in str(skin) and skin not in self.stickers:
-
+                        await self.log("delayed_request", proxy, f"Ошибка: сработал if Sticker | in str(skin), {skin}",
+                                                      thread_id)
 
                         dbt1 = time.time()
-                        async with async_db.Storage() as db:
-                            await db.add_sticker(skin, default_price, ts)
-                        await self.log("delayed_request", proxy, f"Добавил стикер {skin} : {default_price} в бд",
-                                       thread_id)
+                        #async with async_db.Storage() as db:
+                        #    await db.add_sticker(skin, default_price, ts)
+                        #await self.log("delayed_request", proxy, f"Добавил стикер {skin} : {default_price} в бд",
+                        #               thread_id)
                         dbt2 = time.time()
                         self.start_time += (dbt2 - dbt1) * 1.6
                         self.stickers[skin] = default_price
@@ -673,7 +672,7 @@ class FastBot:
                     return None
 
     async def get_sticker_price(self, session, sticker_name, proxy):
-        await asyncio.sleep(7)
+
         url = await self.convert_name_to_link(sticker_name)
         headers = {
             "User-Agent": fake_useragent.UserAgent().random,
@@ -685,44 +684,52 @@ class FastBot:
             'market_hash_name': sticker_name,
             'currency': 5
         }
+        for _ in range(3):
+            await asyncio.sleep(7)
+            try:
+                async with session.get(url=url, headers=headers, params=params, proxy=proxy, ssl=True) as response:
+                    if response.status == 200:
+                        item_text = (await response.text()).strip()
+                        history_line = re.search(r'var line1=(.+);', item_text)
+                        sorted_data = []
+                        days = 15
+                        if history_line:
+                            try:
+                                while len(sorted_data) < 2:
+                                    data = json.loads(history_line.group(1))
+                                    current_date = datetime.datetime.now()
+                                    cutoff_date = current_date - datetime.timedelta(days=days)
 
-        try:
-            async with session.get(url=url, headers=headers, params=params, proxy=proxy, ssl=True) as response:
-                if response.status == 200:
-                    item_text = (await response.text()).strip()
-                    history_line = re.search(r'var line1=(.+);', item_text)
-                    if history_line:
-                        try:
-                            data = json.loads(history_line.group(1))
-                            current_date = datetime.datetime.now()
-                            cutoff_date = current_date - datetime.timedelta(days=15)
+                                    sorted_data = sorted([
+                                        entry[1] for entry in data
+                                        if datetime.datetime.strptime(entry[0], "%b %d %Y %H: +0") >= cutoff_date for _ in
+                                        range(int(entry[2]))
+                                    ])
+                                    n = len(sorted_data)
+                                    days += 10
 
-                            sorted_data = sorted([
-                                entry[1] for entry in data
-                                if datetime.datetime.strptime(entry[0], "%b %d %Y %H: +0") >= cutoff_date for _ in
-                                range(int(entry[2]))
-                            ])
-                            n = len(sorted_data)
+                                # Если количество элементов нечётное
+                                if n % 2 == 1:
+                                    median = sorted_data[n // 2]
+                                else:
+                                    # Если количество элементов чётное
+                                    mid1 = n // 2 - 1
+                                    mid2 = n // 2
+                                    median = (sorted_data[mid1] + sorted_data[mid2]) / 2
+                                if median:
+                                    self.stickers[sticker_name] = median
+                                    async with async_db.Storage() as db:
+                                        await db.add_sticker(sticker_name, median, datetime.datetime.now())
+                                    await self.log("delayed_request", proxy,
+                                                   f"Добавил стикер {sticker_name} : {median} в бд",
+                                                   sticker_name)
+                                    #await self.log("get_sticker_price", proxy, f"{sticker_name}: {median} RUB", sticker_name)
+                                    return median
+                            except Exception as e:
+                                await self.log("get_sticker_price", proxy, f"Ошибка при обработке истории: {e}", sticker_name)
 
-                            # Если количество элементов нечётное
-                            if n % 2 == 1:
-                                median = sorted_data[n // 2]
-                            else:
-                                # Если количество элементов чётное
-                                mid1 = n // 2 - 1
-                                mid2 = n // 2
-                                median = (sorted_data[mid1] + sorted_data[mid2]) / 2
-                            if median:
-                                #self.stickers[sticker_name] = median
-                                async with async_db.Storage() as db:
-                                    await db.add_sticker(sticker_name, median, datetime.datetime.now())
-                                await self.log("get_sticker_price", proxy, f"{sticker_name}: {median} RUB", -1)
-                                #return median
-                        except Exception as e:
-                            await self.log("get_sticker_price", proxy, f"Ошибка при обработке истории: {e}", -1)
-
-        except Exception as e:
-            await self.log("get_sticker_price", proxy, f"Ошибка при обработке истории: {e}", -1)
+            except Exception as e:
+                await self.log("get_sticker_price", proxy, f"Ошибка при обработке истории: {e}", sticker_name)
 
 
 
