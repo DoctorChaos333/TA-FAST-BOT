@@ -67,6 +67,8 @@ def get_info_from_text(item_text: str) -> dict:
     """Принимает текст страницы, возвращает все данные о нем на ТП"""
 
     data = dict()
+    with open('item_text_ex.txt', 'w', encoding='utf-8') as file:
+        print(item_text, file=file)
 
     try:
         listing_info_line = re.search(r'var g_rgListingInfo = (.+);', item_text)
@@ -74,7 +76,17 @@ def get_info_from_text(item_text: str) -> dict:
         print('\nНет лотов')
         return {}
 
+
+
+
+
     if listing_info_line:
+        wallet_currency = re.search(r'var g_rgWalletInfo = (.+);', item_text)
+        if wallet_currency:
+            data['wallet_currency'] = currencies[str(eval(wallet_currency.group(1))['wallet_currency'] + 2000)]
+
+        else:
+            data['wallet_currency'] = None
         listing_info = json.loads(listing_info_line.group(1))
         if listing_info:
             for idx, (listing_id, value) in enumerate(listing_info.items()):
@@ -191,6 +203,12 @@ async def get_last_items(last_time: datetime.datetime) -> dict:
     async with async_db.Storage() as db:
         return await db.last_items(last_time)
 
+async def update_currency(login: str, currency: str) -> None:
+    async with async_db.Storage() as db:
+        await db.update_currency(login, currency)
+
+
+
 
 
 def convert_name_to_link(name: str, appid: str = '730'):
@@ -200,7 +218,7 @@ def convert_name_to_link(name: str, appid: str = '730'):
     link = f"https://steamcommunity.com/market/listings/{appid}/{url}"
     return link
 
-def buy_ticket_item(session: SteamClient, skin, buy_id, appid='730', currency=Currency.RUB, page_num=0, is_hunting=0, price=None, fee=None):
+def buy_ticket_item(session: SteamClient, skin, buy_id, appid='730', currency=Currency.RUB, page_num=0, is_hunting=0, price=None, fee=None, login=None):
     url = convert_name_to_link(skin, appid)
     params = {
         'count': 100,
@@ -233,7 +251,6 @@ def buy_ticket_item(session: SteamClient, skin, buy_id, appid='730', currency=Cu
 
     for _ in range(3):
         with session._session.get(url=url, headers=headers, params=params) as response:
-
             if response.status_code == 200:
                 item_text = response.text
                 info = get_info_from_text(item_text)
@@ -244,7 +261,16 @@ def buy_ticket_item(session: SteamClient, skin, buy_id, appid='730', currency=Cu
                         for i in skin, buy_id, price, fee, currency:
                             print(i, type(i))
                         time.sleep(3)
+
+                        if currency is None and info['wallet_currency']:
+                            currency = eval(f"Currency.{info['wallet_currency']}")
+                            asyncio.run(update_currency(login, info['wallet_currency']))
+
+
                         try:
+                            if not currency:
+                                print('Нет валюты')
+                                raise Exception
                             response = session.market.buy_item(
                                                     market_name=skin,
                                                     market_id=buy_id,
@@ -273,86 +299,84 @@ def buy_ticket_item(session: SteamClient, skin, buy_id, appid='730', currency=Cu
     else:
         asyncio.run(update_ticket_status(buy_id, 0))
 
+
+async def process_new_items(new_items):
+    print(f'\n[{datetime.datetime.now()}] Новые предметы:')
+    for item in new_items:
+        print(f"  - {item['skin']} (buy_id: {item['buy_id']})")
+
+    autobuy_spam_users = await get_spam_users()
+    autobuy_spam_users = [u for u in autobuy_spam_users if u['auto_buy']]
+
+    for item in new_items:
+        suitable_users = [
+            acc for acc in autobuy_spam_users if acc['auto_buy_percent'] >= item['percent']
+        ]
+        if not suitable_users:
+            print(f"  - {item['skin']} {item['buy_id']} ни за кем не закрепляется")
+            continue
+
+        suitable_users.sort(key=lambda x: (x["tariff"], x["auto_buy_percent"]), reverse=True)
+        item['login'] = None
+
+        for user in suitable_users:
+            if random() <= 0.5:
+                item['login'] = user['login']
+                async with async_db.Storage() as db:
+                    await db.add_log_entry(item='process_new_items', proxy_used='', thread_id=-1, table_name='log_entries_AB', log_text=f"{item['skin']} {item['buy_id']} закрепляется за {user['login']}")
+
+        if item['login'] is None:
+            print(f"  - {item['skin']} {item['buy_id']} ни за кем не закрепляется")
+
+
+async def process_new_tickets(new_tickets):
+    for ticket in new_tickets:
+        print(f'\r[{datetime.datetime.now()}] Нашел новый тикет: {ticket}')
+        buy_id = ticket['buy_id']
+        try:
+            login = ticket['steam_login']
+            user = await get_spam_user(login)
+            bot = Bot(user)
+            session = bot.steam_login()
+            currency = user['currency']
+            skin = ticket['skin']
+
+            if currency:
+                currency = eval(f"Currency.{currency}")
+            else:
+                currency = None
+            is_hunting = ticket['is_hunting']
+            price = ticket['price']
+            fee = ticket['fee']
+
+            await update_ticket_status(buy_id, -1)
+            buy_ticket_item(session, skin, buy_id, appid='730', currency=currency, is_hunting=is_hunting, price=price,
+                            fee=fee, login=login)
+
+        except Exception as e:
+            print(f"Ошибка при обработке тикета {buy_id}: {e}")
+            print(traceback.format_exc())
+            await update_ticket_status(buy_id, 0)
+
+
 def main():
     last_datetime = datetime.datetime.now()
     while True:
         new_items = [item for item in asyncio.run(get_last_items(last_datetime)) if item['buy_id']]
-        time.sleep(1)
 
         if new_items:
-            print(f'\n[{datetime.datetime.now()}] Новые предметы:')
-            print(*[[item['skin'], item['buy_id']] for item in  new_items], sep='\n')
-            autobuy_spam_users = [u for u in asyncio.run(get_spam_users()) if u['auto_buy']]
-            for item in new_items:
-                suitable_users = [acc for acc in autobuy_spam_users if acc['auto_buy_percent'] >= item['percent']]
-
-                if not suitable_users:
-                    continue
-
-                suitable_users.sort(key=lambda x: (x["tariff"], x["auto_buy_percent"]), reverse=True)
-
-                item['login'] = None
-
-                for user in suitable_users:
-                    if random() <= 0.5:
-                        item['login'] = user['login']
-                        print(f"{item['skin']} {item['buy_id']} закрепляется за {user['login']}")
-                        break
-
-                if item['login'] is None:
-                    print(f"{item['skin']} {item['buy_id']} ни за кем не закрепляется")
-
-
-
-
-            #input('Это были новые предметы')
-            #with open('tickets_ex.json', 'w', encoding='utf-8') as file:
-            #    json.dump(new_items, fp=file, indent=4)
-
-            #print(f'[{datetime.datetime.now()}] Все пользователи:')
-            #print(*autobuy_spam_users, sep='\n')
-            #with open('auto_buy_spam_users.json', 'w', encoding='utf-8') as file:
-            #    for user in autobuy_spam_users:
-            #        user['session'] = 1 if user['session'] else 0
-            #        user['last_session_ts'] = 0
-            #    json.dump(autobuy_spam_users, fp=file, indent=4)
+            asyncio.run(process_new_items(new_items))
             last_datetime = datetime.datetime.now()
-            #input('Записал примеры данных')
-            #Список из словарей вида {'login': 'rVtRvcJbjY', 'password': '2uDzYalSPTB', 'steamID': '76561199513749651', 'shared': '3bhL51ug5dMycDbFcTlSxEOdWnw=', 'identity': 'KvZIBt1wwfPyQkBnbMJ1RVE5LH8=', 'session': None, 'API': '4510CAB674C19960D68CA6FFA50A08BB', 'last_session_ts': datetime.datetime(2024, 9, 23, 23, 23, 44), 'currency': 'KZT', 'auto_buy': 1, 'auto_buy_percent': 80, 'tariff': 299}
         else:
             print(f'\r[{datetime.datetime.now()}] Нет новых предметов', end='', flush=True)
+
         new_tickets = asyncio.run(ticket_table_checker())
         if new_tickets:
-
-
-            for ticket in new_tickets:
-                print(f'\r[{datetime.datetime.now()}] Нашел новый тикет {ticket}', end='', flush=True)
-                buy_id = ticket['buy_id']
-                try:
-                    login = ticket['steam_login']
-                    user = asyncio.run(get_spam_user(login))
-                    bot = Bot(user)
-                    session = bot.steam_login()
-                    currency = user['currency']
-                    skin = ticket['skin']
-
-                    currency = eval(f"Currency.{currency}")
-                    is_hunting = ticket['is_hunting']
-                    price = ticket['price']
-                    fee = ticket['fee']
-
-                    if True:
-
-                        asyncio.run(update_ticket_status(buy_id, -1))
-                        buy_ticket_item(session, skin, buy_id, appid='730', currency=currency, is_hunting=is_hunting, price=price, fee=fee)
-
-                except:
-                    print(traceback.format_exc())
-
-                    asyncio.run(update_ticket_status(buy_id, 0))
+            asyncio.run(process_new_tickets(new_tickets))
         else:
             print(f'\r[{datetime.datetime.now()}] Нет новых тикетов', end='', flush=True)
+        time.sleep(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
