@@ -11,6 +11,7 @@ import pandas as pd
 import os
 import time
 import gc
+import re
 
 df = pd.read_excel('База предметов.xlsx')
 result_dict = dict(zip(df['Предмет'], df['Какой float ценится']))
@@ -18,6 +19,23 @@ for k in result_dict:
     v = result_dict[k]
     v1 = [[float(num) for num in item.split('-')] for item in v.split(' | ')]
     result_dict[k] = v1
+
+
+def matches_mask(fl):
+    # Преобразуем fl в строку без изменения его точности
+    fl_str = str(fl)
+
+    # Определяем регулярные выражения для масок
+    patterns = [
+        r"^0\.\d{1,2}000$",  # 0.xy000 или 0.x000 или 0.000
+        r"^0\.(\d)\1{2,}$",  # 0.yyyy или 0.xxx (несколько одинаковых цифр с первого-второго знака)
+    ]
+
+    # Проверяем fl_str на соответствие хотя бы одному из шаблонов
+    for pattern in patterns:
+        if re.match(pattern, fl_str):
+            return True
+    return False
 
 
 def is_rarity(skin, fl, percent):
@@ -28,7 +46,7 @@ def is_rarity(skin, fl, percent):
         return True
     if result_dict.get(skin):
         for item in result_dict[skin]:
-            if item[0] <= fl <= item[1]:
+            if item[0] <= fl <= item[1] or matches_mask(fl):
                 return True
     if fl == 1:
         return True
@@ -68,10 +86,21 @@ class FloatParser:
 
             while self.items:
                 gc.collect()
-                time.sleep(3.5)
+                time.sleep(7)
                 min_count = min([len(self.items), len(self.proxies)])
                 proxy_thread = [self.proxies[i] for i in range(min_count)]
                 item_thread = [self.items.pop(0) for _ in range(min_count)]
+
+                self.parsing_result = {
+                    'all': len(item_thread),
+                    'not_parsed': 0,
+                    'not_float': 0,
+                    'low_percent': 0,
+                    'new_percent_lower': 0,
+                    'bad_stickers': [],
+                    'added': 0,
+                }
+
                 self.result_thread = [() for _ in range(min_count)]
                 threads = [threading.Thread(target=self.th_parse_floats, args=(item_thread[i], proxy_thread[i], i)) for i in
                            range(min_count)]
@@ -80,18 +109,36 @@ class FloatParser:
                     thread.start()
                 for thread in threads:
                     thread.join()
+
                 self.result_thread = [element for element in self.result_thread if len(element) > 0]
 
                 # print(*self.items_to_update, sep='\n')
                 print()
                 print('УДАЛЮ', len(self.items_to_update))
-                print('В SPAM_PROFIT', len(self.result_thread))
+
+
+                showed_dict = {}
+                for item in self.result_thread:
+                    if item[1] not in showed_dict:
+                        showed_dict[item[1]] = 1
+                    else:
+                        showed_dict[item[1]] += 1
+
+
 
                 asyncio.run(smthmany(self.result_thread, name='spam_profit'))
+
+                self.parsing_result['added'] = len(self.result_thread)
+
+                asyncio.run(log('parse_floats', '', f'Результат: {self.parsing_result},'))
+
+                if showed_dict:
+                    asyncio.run(dump_statistics_showed(showed_dict))
 
                 if len(self.items_to_update) > 1:
                     asyncio.run(delete_ids(self.items_to_update))
                     self.items_to_update = []
+
         if self.scraper:
             self.scraper.close()
             del self.scraper
@@ -114,8 +161,8 @@ class FloatParser:
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Site": "none",
             "User-Agent": fake_useragent.UserAgent().firefox,
-            "X-Sih-Token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjgyMzExLCJ0b2tlbiI6Ijg1OTk2ZTc5OTBmMTViZmM0YzQ1ZGQ4N2RmMjA0ZjBjYTA3YzhiOTkyYTA4NjMwZmM3Y2Y0ZDAyYjg2NjI0Mzk3NjM1ZjNmZjFjMmRjNDhmZDg5OGM4YzdiMGFhMDgyMzU0ZTBkZWZiZWUzNmEzYzQzZDE4NTU1ODM5NmM1NmE5IiwiZGF0YSI6bnVsbCwiaWF0IjoxNzI2NTgyMjc0LCJleHAiOjE3MjkxNzQyNzR9.5OFuloRm0Hw5-MZy46KJYUntYWsnLWSgjVLVSjpRV2A",
-            "X-Sih-Version": "2.1.0"
+            "X-Sih-Token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjM4MDI2LCJ0b2tlbiI6IjdkZjIwMTFkZjQ3YTI1Yjk1M2VkNzBlNTRlNjYxMjc2NTkzZTE1OTE4OTA2NjZkYTI5MDY5OTliMjgyNjQwMThmY2JjNTkyMzliMjExNzUzNzg0MTk0ZTY3NTA4MTM5ODRjMDE2ZDhhNWNlODRlMmRiMGY0N2NmNDk5NjQzMTNhIiwiZGF0YSI6bnVsbCwiaWF0IjoxNzMxODg0MDcwLCJleHAiOjE3MzQ0NzYwNzB9.yFYLaNo1hcgnqjRdVtEhr9DE8g2N10E1uQWz1kE501c",
+            "X-Sih-Version": "2.1.13"
         }
         # steam://rungame/730/76561202255233023/ csgo_econ_action_preview M5269862557101848699A39457149428D478659805249054517
         fl_url = f"https://floats.steaminventoryhelper.com/?url={link.replace('20M%', '20M').replace('%A%', 'A').replace('%D', 'D')}"
@@ -149,17 +196,23 @@ class FloatParser:
                     str(ts), str(wear), str(sticker_slot), str(sticker_price), str(profit), str(percent), str(fl),
                     page_num)
         not_response = False
+        bad_stickers = False
         try:
             response = self.scraper.get(fl_url, proxies=proxy, headers=headers, verify=True, timeout=5)
         except:
             print('Пока такого скина нет в бд SIH')
-            #print(traceback.format_exc())
+            #
+            self.parsing_result['not_parsed'] += 1
             print(157, proxy)
+            self.items_to_update.append(id_)
             not_response = True
         finally:
             gc.collect()
             if not_response:
                 return 0
+
+
+
         if response.status_code == 200:
             rs_json = response.json()
             if rs_json.get('success'):
@@ -176,7 +229,7 @@ class FloatParser:
                     sticker_price = eval(sticker_price)
                     api_wear = [[st['name'], st['wear']] for st in stickers]
                     profit = float(profit)
-                    percent = float(percent)
+                    old_percent = float(percent)
 
                     listing_price = float(listing_price)
                     default_price = float(default_price)
@@ -245,12 +298,21 @@ class FloatParser:
                                 sticker_addition_price += (st_price * 0.085)
                             elif st_price < 10000:
                                 sticker_addition_price += (st_price * 0.095)
+                        elif sticker.count(sticker[j]) == 1 and wear[j][1] > 0:
+                            bad_stickers = True
+
 
                     profit = (default_price * 0.87 + sticker_addition_price - listing_price)
 
                     profit = round(profit, 2)
                     # print(sticker_price)
                     percent = round(profit / listing_price * 100, 2)
+
+                    if percent < round(old_percent * 0.9, 2):
+                        self.parsing_result['new_percent_lower'] += 1
+
+                    #if bad_stickers:
+                    #    self.parsing_result['bad_stickers'].append([skin, buy_id, listing_price, fl_url, wear, api_wear])
 
                     wear = str(wear)
                     sticker = str(sticker)
@@ -266,12 +328,18 @@ class FloatParser:
                     self.result_thread[idx] = (
                         buy_id, skin, id_, listing_price, default_price, steam_without_fee, sticker, url, ts, wear,
                         sticker_slot, sticker_price, profit, percent, fl, page_num)
+                elif not float_value:
+                    self.parsing_result['not_float'] += 1
+                    self.items_to_update.append(id_)
+                elif percent < -10:
+                    self.parsing_result['low_percent'] += 1
+                    self.items_to_update.append(id_)
                 else:
                     self.items_to_update.append(id_)
             else:
                 print('NOT SUCCESS')
         else:
-            print(429)
+            print('Такой response_status_code', response.status_code, proxy['http'])
 
 
 async def fetch_temp():
@@ -286,6 +354,19 @@ async def delete_ids(args):
     async with async_db.Storage() as db:
         await db.delete_ids(args)
 
+async def dump_statistics_showed(args: dict):
+    data = []
+    for skin, showed in args.items():
+        data.append((skin, showed))
+    async with async_db.Storage() as db:
+        await db.dump_statistics_showed(data)
+
+
+async def log(item, proxy_used, message, thread_id=None):
+    """Асинхронная функция для записи лога."""
+    async with async_db.Storage() as db:
+        await db.add_log_entry(item, proxy_used, message, thread_id, table_name='log_entries_FC')
+
 def main():
 
     #loop = asyncio.new_event_loop()
@@ -296,13 +377,19 @@ def main():
             proxies.append('http://' + line.strip().split(':')[2] + ':' + line.strip().split(':')[3] + '@' + \
                     line.strip().split(':')[0] + ':' + line.strip().split(':')[1])
     if True:
+        print('Получаю ссылки...')
         while True:
-
-            items = asyncio.run(fetch_temp())
             time.sleep(1)
             try:
+                items = asyncio.run(fetch_temp())
+            except:
+                print(traceback.format_exc())
+                continue
+            print('Сейчас буду обрабатывать')
+            try:
                 if items:
-                    print('ВСЕГО ОБНАРУЖЕНО ССЫЛОК', len(items))
+                    asyncio.run(log('main', '', f'Получил ссылки: {len(items)} штук'))
+
                     float_parser = FloatParser(items.copy(), proxies=proxies)
                     if float_parser.scraper:
                         float_parser.scraper.close()
@@ -315,7 +402,6 @@ def main():
             except:
                 print(traceback.format_exc())
                 time.sleep(10)
-
 
 
 if __name__ == '__main__':
