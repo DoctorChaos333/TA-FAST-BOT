@@ -249,29 +249,44 @@ class FastBot:
             return {}
 
         history_line = re.search(r'var line1=(.+);', item_text)
+
+        sorted_data = []
+        days = 15
+        default_price = math.inf
+        default_price_without_fee = math.inf
         if history_line:
             try:
-                history = tuple(
-                    [
-                        (
-                            datetime.datetime.strptime(i[0], '%b %d %Y %H: +%S').timestamp(),
-                            i[1],
-                            int(i[2])
-                        ) for i in json.loads(history_line.group(1))
-                        if datetime.datetime.now().timestamp() - datetime.datetime.strptime(i[0],
-                                                                                            '%b %d %Y %H: +%S').timestamp() < time_
-                    ]
-                )
-                data['history'] = history
-                await self.log("delayed_request", proxy, f"История успешно обработана: {len(history)} записей.", thread_id)
+                while len(sorted_data) < 2:
+                    data_history = json.loads(history_line.group(1))
+                    current_date = datetime.datetime.now()
+                    cutoff_date = current_date - datetime.timedelta(days=days)
+
+                    sorted_data = sorted([
+                        entry[1] for entry in data_history
+                        if datetime.datetime.strptime(entry[0], "%b %d %Y %H: +0") >= cutoff_date for _ in
+                        range(int(entry[2]))
+                    ])
+                    n = len(sorted_data)
+                    days += 10
+
+                # Если количество элементов нечётное
+                if n % 2 == 1:
+                    median = sorted_data[n // 2]
+                else:
+                    # Если количество элементов чётное
+                    mid1 = n // 2 - 1
+                    mid2 = n // 2
+                    median = (sorted_data[mid1] + sorted_data[mid2]) / 2
+                if median:
+                    default_price = median
+                    default_price_without_fee = median * 0.87
             except Exception as e:
-                await self.log("delayed_request", proxy, f"Ошибка при обработке истории: {e}", thread_id)
+                await self.log("delayed_request", proxy, f"Ошибка при обработке skins_info: {e}", thread_id)
 
         if listing_info_line:
             try:
                 data['skins_info'] = {}
-                default_price = math.inf
-                default_price_without_fee = math.inf
+
 
                 for idx, (listing_id, value) in enumerate(listing_info.items()):
                     if idx > min(len(listing_info), 100):
@@ -383,7 +398,7 @@ class FastBot:
         await self.delayed_request(session, url, headers, params, proxy, db_connection, t1, url_el, idx, appid)
 
     async def delayed_request(self, session, url, headers, params, proxy, db_connection, t1, url_el, idx, appid,
-                              max_parse=300):
+                              max_parse=500):
         thread_id = url_el.element
         await asyncio.sleep(t1)  # Задержка перед выполнением запроса
         await self.log("delayed_request", proxy, f"Задержка перед запросом {t1} секунд для {url}", thread_id)
@@ -396,6 +411,10 @@ class FastBot:
             for start in range(0, max_parse, 100):
                 self.response_counter += 1
                 params['start'] = start
+                if idx <= int(self.len_links * divis):
+                    params['filter'] = 'Sticker'
+                else:
+                    params.pop('filter', None)
                 async with session.get(url=url, headers=headers, params=params, proxy=proxy, ssl=True) as response:
                     if response.status == 200:
                         item_text = (await response.text()).strip()
@@ -427,7 +446,8 @@ class FastBot:
                 passed_items = {
                     'cheap_stickers': 0,
                     'float, percent < percent' : 0,
-                    'not sticker': 0
+                    'not sticker': 0,
+                    'exists': 0
                 }
                 default_price = math.inf
                 default_price_without_fee = math.inf
@@ -549,9 +569,9 @@ class FastBot:
                         dbt2 = time.time()
                         self.start_time += (dbt2 - dbt1) * 1.6
                         self.stickers[skin] = default_price
-                    elif 'Sticker |' not in str(skin):
 
-                        if (percent > 0 and sticker) or (idx > int(self.len_links * divis) and percent > -30):
+                    elif 'Sticker |' not in str(skin):
+                        if (percent > 0 and sticker) or (idx > int(self.len_links * divis) and percent > -10):
                             if sticker:
                                 have_stickers += 1
                             added_to_temp += 1
@@ -565,21 +585,25 @@ class FastBot:
                             passed_items['float, percent < percent'] += 1
                         elif not sticker:
                             passed_items['not sticker'] += 1
-                await self.log("delayed_request", proxy, f"Было: {len(info)}. Отсеял: {str(passed_items)}. Добавлю: {len(skin_lots)}",
-                               thread_id)
+
+
+                if skin is not None:
+                    async with async_db.Storage() as db:
+                        await db.dump_statistics(skin=skin, added_to_temp=added_to_temp, have_stickers=have_stickers)
 
 
                 if skin_lots:
-                    if skin is not None:
-                        async with async_db.Storage() as db:
-                            await db.dump_statistics(skin=skin, added_to_temp=added_to_temp, have_stickers=have_stickers)
 
                     await self.log("delayed_request", proxy,
                                    f"Скины подготовлены для базы, всего: {len(skin_lots)} записей", thread_id)
                     await self.log("delayed_request", proxy, f"Что грузим: {[i[2] for i in skin_lots]}", thread_id)
                     async with async_db.Storage() as db:
-                        await db.smthmany(skin_lots)
-                    await self.log("delayed_request", proxy, f"Скины выгружены в базу, всего: {len(skin_lots)} записей", thread_id)
+                        exists = await db.smthmany(skin_lots)
+                        passed_items['exists'] = exists
+                    #await self.log("delayed_request", proxy, f"Скины выгружены в базу, всего: {len(skin_lots)} записей", thread_id)
+                    await self.log("delayed_request", proxy,
+                                   f"Было: {len(info)}. Отсеял: {str(passed_items)}. Добавлю: {len(skin_lots) - exists}",
+                                   thread_id)
 
             info = {'code': response.status, 'info': info, 'url': url}
 
@@ -836,4 +860,3 @@ async def main():
 
 # Запускаем бесконечный цикл
 asyncio.run(main())
-
