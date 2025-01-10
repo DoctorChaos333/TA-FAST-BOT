@@ -74,6 +74,7 @@ class Bot:
                         break
                 else:
                     print(f'[{self.login}] Логинимся в аккаунт...')
+                    print(self.proxies)
                     self.session = SteamClient(api_key=self.api_key, proxies=self.proxies)
                     self.session.login(self.login, self.password, steam_json)
                     if self.session.is_session_alive():
@@ -102,11 +103,14 @@ def convert_name_to_link(name: str, appid: str = '730'):
 
 async def ping_proxy(proxy_):
     async with aiohttp.ClientSession() as session:
-        async with session.get(url='https://steamcommunity.com/', proxy=proxy_.element, ssl=False) as response:
-            if response.status == 200:
-                return proxy_
-            else:
-                return None
+        try:
+            async with session.get(url='https://steamcommunity.com/', proxy=proxy_.element, ssl=False) as response:
+                if response.status == 200:
+                    return proxy_
+                else:
+                    return None
+        except:
+            print(f'Ошибка. {proxy_} не работает')
 
 
 class FastBot:
@@ -207,19 +211,44 @@ class FastBot:
             return {}
 
         history_line = re.search(r'var line1=(.+);', item_text)
+
+        sorted_data = []
+        days = 15
+        default_price = math.inf
+        default_price_without_fee = math.inf
         if history_line:
-            history = tuple(
-                [(datetime.datetime.strptime(i[0], '%b %d %Y %H: +%S').timestamp(), i[1], int(i[2])) for i in
-                 json.loads(history_line.group(1)) if
-                 datetime.datetime.now().timestamp() - datetime.datetime.strptime(i[0],
-                                                                                  '%b %d %Y %H: +%S').timestamp() < time_])
-            data['history'] = history
+            while len(sorted_data) < 2:
+                data_history = json.loads(history_line.group(1))
+                current_date = datetime.datetime.now()
+                cutoff_date = current_date - datetime.timedelta(days=days)
+
+                sorted_data = sorted([
+                    entry[1] for entry in data_history
+                    if datetime.datetime.strptime(entry[0], "%b %d %Y %H: +0") >= cutoff_date for _ in
+                    range(int(entry[2]))
+                ])
+                n = len(sorted_data)
+                days += 10
+
+            # Если количество элементов нечётное
+            if n % 2 == 1:
+                median = sorted_data[n // 2]
+            else:
+                # Если количество элементов чётное
+                mid1 = n // 2 - 1
+                mid2 = n // 2
+                median = (sorted_data[mid1] + sorted_data[mid2]) / 2
+            if median:
+                default_price = median
+                default_price_without_fee = median * 0.87
+
+
+        default_price *= 100
+        default_price_without_fee *= 100
 
         if listing_info_line:
             listing_info = json.loads(listing_info_line.group(1))
             data['skins_info'] = dict()
-            default_price = math.inf
-            default_price_without_fee = math.inf
             for idx, (listing_id, value) in enumerate(listing_info.items()):
                 if idx > min(len(listing_info), 100):
                     break
@@ -321,7 +350,7 @@ class FastBot:
 
     async def delayed_request(self, url, headers, params, proxy, db, t1, skin, appid, account_id, max_percent,
                               max_parse=2000, login=''):
-
+        print('delayed_request', login, account_id)
         await asyncio.sleep(t1)  # Задержка перед выполнением запроса
         # if (self.response_counter / len(self.proxies)) % 15 == 0 and self.response_counter > 0:
         #    print(
@@ -330,23 +359,19 @@ class FastBot:
         #    await asyncio.sleep(75)
 
         # Выполнение самого запроса
+
         info = {
             'code': 429,
             'info': {},
             'url': url
         }
+
         common_skins_info = dict()
-        default_price, fee = await db.get_default_price(account_id)
-        #print('Нашел default_price', default_price, fee, account_id)
 
-        if type(default_price) == int and type(fee) == int:
-            default_price = default_price
-            default_price_without_fee = default_price - fee
-        else:
-            default_price = math.inf
-            default_price_without_fee = math.inf
 
-        #print('Default_price_without_fee', default_price_without_fee, account_id)
+        default_price = math.inf
+        default_price_without_fee = math.inf
+
 
         old_info = None
         info0_counter = 0
@@ -358,9 +383,11 @@ class FastBot:
                     if start % 5 == 0:
                         await asyncio.sleep(10)
                     self.response_counter += 1
+
                     print(
                         f'\r[{datetime.datetime.now()}] Сделано запросов: {self.response_counter} RPS: {round(self.response_counter / (time.time() - self.start_time), 2)}',
                         end='', flush=True)
+
                     params['start'] = start
                     session.cookie_jar.update_cookies(self.cookies[login]['cookie'])
                     async with session.get(url=url, headers=headers, params=params, proxy=proxy, ssl=True) as response:
@@ -402,6 +429,7 @@ class FastBot:
                                         page_num = v['page_num']
                                         wear = [[st, 0] for st in sticker]
                                         if default_price != listing_price:
+                                            print(skin, listing_price, default_price_without_fee)
                                             percent = int(100 * listing_price / default_price_without_fee - 100)
                                         else:
                                             percent = 0
