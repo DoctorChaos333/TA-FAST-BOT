@@ -2,6 +2,7 @@ import asyncio
 import datetime
 import json
 import math
+import queue
 import random
 import sys
 import requests
@@ -14,6 +15,7 @@ import aiohttp
 import async_db
 import steam_currencies
 from async_db import *
+
 common_start = time.time()
 from dateutil import parser
 from decimal import Decimal
@@ -21,9 +23,14 @@ from steampy.client import SteamClient
 import pickle
 import traceback
 import os
+
+
+
+
 from steampy.models import GameOptions
 
-sleep_div = 3
+sleep_div = 4
+
 
 
 class Bot:
@@ -146,7 +153,7 @@ class Element:
 class FastBot:
     def __init__(self):
         self.response_counter = 0
-        self.skin_counter = set()
+
         self.currencies = {
             "2001": "USD", "2002": "GBP", "2003": "EURO", "2004": "CHF", "2005": "RUB",
             "2006": "PLN", "2007": "BRL", "2008": "JPY", "2009": "NOK", "2010": "IDR",
@@ -162,13 +169,12 @@ class FastBot:
 
         # Загрузка прокси
         global sleep_div
-
-        self.proxies = []
-        if False:
+        if True:
             with open('proxies.txt', 'r', encoding='utf-8') as file:
                 self.proxies = [
                     Element('http://' + line.strip().split(':')[2] + ':' + line.strip().split(':')[3] + '@' +
                             line.strip().split(':')[0] + ':' + line.strip().split(':')[1]) for line in file.readlines()]
+
             sleep_div = 1
 
         else:
@@ -181,7 +187,6 @@ class FastBot:
                 Element('http://' + line.strip().split(':')[2] + ':' + line.strip().split(':')[3] + '@' +
                         line.strip().split(':')[0] + ':' + line.strip().split(':')[1]) for line in rs.text.split('\n') if line]
 
-            self.proxies *= 2
 
 
         self.responses = {proxy.element: [] for proxy in self.proxies}
@@ -192,7 +197,8 @@ class FastBot:
         self.headers = {'User-Agent': fake_useragent.UserAgent().chrome}
         self.start_time = time.time()
         self.currency_converter = None
-
+        self.stickers_counter = 0
+        self.skins_counter = 0
 
     async def async_init(self):
         """Асинхронный метод для инициализации логов и других асинхронных задач."""
@@ -200,11 +206,70 @@ class FastBot:
         await self.log("FastBot", None, f"Загружено {len(self.proxies)} прокси")
         await self.log("FastBot", None, "Инициализация FastBot завершена")
 
+    async def worker(self, queue: asyncio.Queue):
+        """
+        Воркер для обработки задач в очереди, привязанной к конкретному прокси.
+        """
+        session = proxy = None
+        while True:
+
+            link = None
+            while queue.empty():
+                try:
+                    if len(baza730) > len(floats):
+                        link = Element(baza730.pop(0))
+                    elif len(floats) > len(baza730):
+                        link = Element(floats.pop(0))
+    
+                    if all([proxy, link, proxy]):
+                        await queue.put([session, link, proxy])
+                        print('Теперь длина очереди:', queue.qsize())
+                    else:
+                        print('Завершаю')
+                        break
+                except:
+                    pass
+            await asyncio.sleep(10)
+            session, link, proxy = await queue.get()
+            try:
+                t1 = time.time()
+                delayed_request_time = await self.fetch_item(session, link, proxy)
+                t2 = time.time()
+                timing_details = {}
+                for key, value in delayed_request_time.items():
+                    if value / (t2 - t1) > 0.03 and round(value, 1) > 0:
+                        timing_details[key] = round(value, 1)
+                print(f'ALL TIME: {round(t2 - t1, 1)} DETAILS: {str(timing_details)}')
+            except Exception as e:
+                await self.log("FastBot", None, f"Ошибка: {traceback.format_exc()}")
+            finally:
+                # Симуляция обработки запроса
+                queue.task_done()
+
+
+    async def requests_collector(self, queues):
+        print('Запустил коллектор запросов')
+        while True:
+            if all(queue.empty() for queue in queues):
+                break
+            await asyncio.sleep(60)
+            skins_counter = int(self.skins_counter)
+            stickers_counter = int(self.stickers_counter)
+            self.skins_counter = 0
+            self.stickers_counter = 0
+            await self.add_requests_info(skins_counter, stickers_counter)
+            print('Собрал данные')
+
+
     async def log(self, item, proxy_used, message, thread_id=None):
         """Асинхронная функция для записи лога."""
-        proxy_used = None
+        if message.startswith('Выполнение запроса') or message.startswith('Ошибка'):
+            async with async_db.Storage() as db:
+                await db.add_log_entry(item, proxy_used, message, thread_id)
+
+    async def add_requests_info(self, skins_counter, stickers_counter):
         async with async_db.Storage() as db:
-            await db.add_log_entry(item, proxy_used, message, thread_id)
+            await db.add_requests_info(skins_counter, stickers_counter)
 
     async def convert_name_to_link(self, name: str, appid: str = '730'):
         url = name.replace(' ', '%20').replace('#', '%23').replace(',', '%2C').replace('|', '%7C')
@@ -391,7 +456,7 @@ class FastBot:
 
         return data
 
-    async def fetch_item(self, session: aiohttp.ClientSession, url_el: Element, proxy: list[Element], idx: int,
+    async def fetch_item(self, session: aiohttp.ClientSession, url_el: Element, proxy: str, idx: int=0,
                          appid: str = '730', db_connection=None, sticker=False):
         thread_id = url_el.element
         url = await self.convert_name_to_link(url_el.element, appid)
@@ -411,46 +476,72 @@ class FastBot:
         await self.log("fetch_item", proxy, f"Запуск fetch_item для {url_el.element}, idx: {idx}", thread_id)
 
         # Независимая задержка для каждого запроса
-        #t1 = random.randint(8900, 9000) / 1000 * (idx // len(self.proxies))
-        t1 = random.randint(8900, 9000) / 1000 * (idx // 100)
-        await self.delayed_request(session, url, headers, params, proxy, db_connection, t1, url_el, idx, appid)
+        t1 = random.randint(8900, 9000) / 1000 * (idx // len(self.proxies))
 
-    async def delayed_request(self, session, url, headers, params, proxy: list[Element], db_connection, t1, url_el, idx, appid,
-                              max_parse=1200):
+        return await self.delayed_request(session, url, headers, params, proxy, db_connection, t1, url_el, idx, appid, max_parse=1000)
+
+    async def delayed_request(self, session, url, headers, params, proxy, db_connection, t1, url_el, idx, appid,
+                              max_parse=1000):
+
+        timing_details = {
+            'initial_delay': 0,
+            'request_execution': 0,
+            'processing_response': 0,
+            'sticker_price_calculation': 0,
+            'database_operations': 0,
+            'get_sticker_price': 0,
+            'dump_statistics': 0,
+            'smthmany': 0
+        }
         thread_id = url_el.element
-        await asyncio.sleep(t1 / sleep_div)  # Задержка перед выполнением запроса
+
         await self.log("delayed_request", proxy, f"Задержка перед запросом {t1} секунд для {url}", thread_id)
 
         info = {'code': 429, 'info': {}, 'url': url}
         common_skins_info = {}
 
         try:
-            await self.log("delayed_request", proxy, f"Выполнение запроса {url}", thread_id)
+
             start = 0
             while start < max_parse:
+                await self.log("delayed_request", proxy, f"Выполнение запроса {url}", thread_id)
                 self.response_counter += 1
                 params['start'] = int(start)
                 start += 100
-                if idx <= int(self.len_links * divis):
+                if set_of_skins:
                     params['filter'] = 'Sticker'
                 else:
                     params.pop('filter', None)
-                page_num = int(start / 100)
-                pr = proxy[page_num % len(proxy)].element
-                async with session.get(url=url, headers=headers, params=params, proxy=pr, ssl=True) as response:
+                self.skins_counter += 1
+
+
+                delay_start = time.time()
+                await asyncio.sleep(10)
+                delay_end = time.time()
+                timing_details['initial_delay'] += (delay_end - delay_start)
+
+                request_start = time.time()
+                async with session.get(url=url, headers=headers, params=params, proxy=proxy, ssl=True) as response:
+                    request_end = time.time()
+                    timing_details['request_execution'] += (request_end - request_start)
                     if response.status == 200:
+                        process_start = time.time()
                         item_text = (await response.text()).strip()
                         info = await self.get_info_from_text(item_text=item_text, appid=appid,
-                                                             page_num=page_num, thread_id=thread_id)
+                                                             page_num=int(start / 100), thread_id=thread_id)
+                        process_end = time.time()
+                        timing_details['processing_response'] += (process_end - process_start)
                         self.stop_parsing = False
                         await self.log("delayed_request", proxy,
                                        f"Запрос успешен, данные извлечены: {len(info)} записей", thread_id)
                     elif response.status == 429:
+                        print('Превышено количество запросов')
                         await self.log("delayed_request", proxy, "Слишком много запросов, повтор через 300 секунд", thread_id)
                         await asyncio.sleep(30)
                         raise Exception("Превышено количество запросов")
 
                     if info:
+                        sticker_start = time.time()
                         if len(common_skins_info | info['skins_info']) == len(common_skins_info):
                             break
                         else:
@@ -472,11 +563,13 @@ class FastBot:
                             if 0 < len(info['skins_info']) < 100:
                                 break
 
-                            await asyncio.sleep(9 / sleep_div)
+                            #await asyncio.sleep(9 / sleep_div)
+                        sticker_end = time.time()
+                        timing_details['sticker_price_calculation'] += (sticker_end - sticker_start)
 
-                            if (start == max_parse) and (3 * default_price < max_price):
-                                max_parse += 100
                     else:
+                        if start == 100:
+                            print('Просто ничего не пришло')
                         break
 
             info = common_skins_info
@@ -537,21 +630,11 @@ class FastBot:
                                     else:
                                         sticker_addition_price += st_price * 0.095
                             else:
-                                await asyncio.sleep(3 / sleep_div)
-                                #response_from_sticker = await self.delayed_request(
-                                #    session=session,
-                                #    url=await self.convert_name_to_link(st),
-                                #    headers=headers,
-                                #    params=params,
-                                #    proxy=proxy,
-                                #    db_connection=db_connection,
-                                #    t1=7,
-                                #    url_el=url_el,
-                                #    idx=1,
-                                #    appid=appid,
-                                #    max_parse=100
-                                #)
+                                get_sticker_price_start = time.time()
                                 new_st_price = await self.get_sticker_price(session=session, sticker_name=st, proxy=proxy)
+                                get_sticker_price_end = time.time()
+
+                                timing_details['get_sticker_price'] += (get_sticker_price_end - get_sticker_price_start)
 
                                 if st in self.stickers and new_st_price:
                                     st_price = self.stickers[st]
@@ -605,16 +688,12 @@ class FastBot:
                                                       thread_id)
 
                         dbt1 = time.time()
-                        #async with async_db.Storage() as db:
-                        #    await db.add_sticker(skin, default_price, ts)
-                        #await self.log("delayed_request", proxy, f"Добавил стикер {skin} : {default_price} в бд",
-                        #               thread_id)
                         dbt2 = time.time()
                         self.start_time += (dbt2 - dbt1) * 1.6
                         self.stickers[skin] = default_price
 
                     elif 'Sticker |' not in str(skin):
-                        if (percent > 0 and sticker) or (idx > int(self.len_links * divis) and percent > -10):
+                        if (percent > 0 and sticker) or (skin in set_of_floats and percent > -10):
                             if sticker:
                                 have_stickers += 1
                             added_to_temp += 1
@@ -624,39 +703,39 @@ class FastBot:
                                               str(percent), str(market_actions_link), '1', page_num))
                         elif percent < 0 and sticker:
                             passed_items['cheap_stickers'] += 1
-                        elif idx > int(self.len_links * divis) and percent > -30:
+                        elif skin in set_of_floats and percent > -30:
                             passed_items['float, percent < percent'] += 1
                         elif not sticker:
                             passed_items['not sticker'] += 1
 
-
+                statistics_start = time.time()
                 if skin is not None:
                     async with async_db.Storage() as db:
                         await db.dump_statistics(skin=skin, added_to_temp=added_to_temp, have_stickers=have_stickers)
+                statistics_end = time.time()
+
+                timing_details['dump_statistics'] += (statistics_end - statistics_start)
 
                 await self.log("delayed_request", proxy,
                                f"Скины подготовлены для базы, всего: {len(skin_lots)} записей", thread_id)
                 await self.log("delayed_request", proxy, f"Что грузим: {[i[2] for i in skin_lots]}", thread_id)
-                if skin_lots:
-                    async with async_db.Storage() as db:
-                        exists = await db.smthmany(skin_lots)
-                        if len(skin_lots) - exists:
-                            await asyncio.sleep(0.1)
-                        passed_items['exists'] = exists
-                    # await self.log("delayed_request", proxy, f"Скины выгружены в базу, всего: {len(skin_lots)} записей", thread_id)
-                    await self.log("delayed_request", proxy,
-                                   f"Было: {len(info)}. Отсеял: {str(passed_items)}. Добавлю: {len(skin_lots) - exists}",
-                                   thread_id)
 
+                smthmany_start = time.time()
+                async with async_db.Storage() as db:
+                    exists = await db.smthmany(skin_lots)
+                    passed_items['exists'] = exists
+                smthmany_end = time.time()
 
-
-
-            info = {'code': response.status, 'info': info, 'url': url}
+                timing_details['smthmany'] += (smthmany_end - smthmany_start)
+                # await self.log("delayed_request", proxy, f"Скины выгружены в базу, всего: {len(skin_lots)} записей", thread_id)
+                await self.log("delayed_request", proxy,
+                               f"Было: {len(info)}. Отсеял: {str(passed_items)}. Добавлю: {len(skin_lots) - exists}",
+                               thread_id)
 
         except Exception as e:
             await self.log("delayed_request", proxy, f"Ошибка при выполнении запроса: {traceback.format_exc()}", thread_id)
         finally:
-            return info
+            return timing_details
 
     async def parse_items(self, list_of_names: list, appid: str, cookies):
         async with async_db.Storage() as db:
@@ -709,28 +788,68 @@ class FastBot:
 
         # Логирование асинхронного выполнения запросов
         tasks = []
+        self.requests_info = {}
         async with aiohttp.ClientSession() as session:
             session.cookie_jar.update_cookies(cookies)
             async with async_db.Storage() as db:
                 await db.add_log_entry("session_cookies", None, "Обновлены cookies для сессии")
 
-            for idx, link in enumerate(self.links):
-                proxy = []
-                for _ in range(10):
-                    if self.proxies:
-                        pr = random.choice(self.proxies)
-                        proxy.append(pr)
-                        self.proxies.remove(pr)
-                #proxy = self.proxies[idx % len(self.proxies)].element
-                tasks.append(asyncio.create_task(self.fetch_item(session, link, proxy, idx)))
-                async with async_db.Storage() as db:
-                    await db.add_log_entry("fetch_task_creation", None,
-                                           f"Создана задача fetch_item для {link.element}")
 
 
-            await asyncio.gather(*tasks)
-            async with async_db.Storage() as db:
-                await db.add_log_entry("fetch_tasks_complete", None, "Все задачи fetch_item завершены")
+            #Тут пока будет экспериментальный модуль
+
+            queues = [asyncio.Queue() for _ in range(len(self.proxies))]
+
+            division_of_pack = (len(self.links) + len(self.proxies) - 1) // len(self.proxies)
+
+            self_links_copy = self.links.copy()
+
+            proxies_pack = {}
+            for idx, pr_ in enumerate(self.proxies):
+                if pr_.element not in proxies_pack:
+                    proxies_pack[pr_.element] = []
+                for _ in range(division_of_pack):
+                    if self_links_copy:
+                        link = self_links_copy.pop(0)
+                        proxies_pack[pr_.element].append(link)
+                        #print(f'Добавляю queues[{idx}] [{session}, {link}, {pr_}]')
+                        await queues[idx].put([session, link, pr_.element])
+
+            workers = [asyncio.create_task(self.worker(queue)) for queue in queues]
+
+            monitor_task = asyncio.create_task(self.requests_collector(queues))
+
+            # Дожидаемся, пока все очереди будут обработаны
+            await asyncio.gather(*(queue.join() for queue in queues))
+
+
+
+            await monitor_task
+
+            # Завершаем воркеров
+            for w in workers:
+                w.cancel()
+
+
+
+
+
+            
+            #for idx, link in enumerate(self.links):
+            #    proxy = self.proxies[idx % len(self.proxies)].element
+            #    if proxy not in self.requests_info:
+            #        self.requests_info[proxy] = []
+            #    tasks.append(asyncio.create_task(self.fetch_item(session, link, proxy, idx)))
+            #    async with async_db.Storage() as db:
+            #        await db.add_log_entry("fetch_task_creation", proxy,
+            #                               f"Создана задача fetch_item для {link.element}")
+#
+            #await asyncio.gather(*tasks)
+            #async with async_db.Storage() as db:
+            #    await db.add_log_entry("fetch_tasks_complete", None, "Все задачи fetch_item завершены")
+            #for key, value in self.requests_info.items():
+            #    print(key, value)
+            #print('-'*50)
 
         async with async_db.Storage() as db:
             await db.add_log_entry("parse_items_end", None, "parse_items завершена успешно")
@@ -764,6 +883,7 @@ class FastBot:
         for _ in range(3):
             await asyncio.sleep(7 / sleep_div)
             try:
+                self.stickers_counter += 1
                 async with session.get(url=url, headers=headers, params=params, proxy=proxy, ssl=True) as response:
                     if response.status == 200:
                         item_text = (await response.text()).strip()
@@ -836,6 +956,8 @@ async def main():
 
             bot = FastBot()
             await bot.async_init()
+            global baza730
+            global floats
             with open('baza730.txt', 'r', encoding='utf-8') as file:
                 baza730 = file.read().split('\n')
             async with async_db.Storage() as db:
@@ -846,9 +968,13 @@ async def main():
             async with async_db.Storage() as db:
                 await db.add_log_entry("file_load", "floats.txt", f"Файл floats загружен, элементов: {len(floats)}")
 
-            floats *= 2
 
             names = list(set(baza730))
+            global set_of_floats
+            set_of_floats = set(floats)
+
+            global set_of_skins
+            set_of_skins = set(baza730)
 
             async with async_db.Storage() as db:
                 await db.add_log_entry("data_combination", None,
@@ -862,7 +988,7 @@ async def main():
             async with async_db.Storage() as db:
                 await db.add_log_entry("session_cookies", None, "Cookies установлены для сессии")
 
-            step = 90
+            step = len(bot.proxies) * 3
 
             global divis
             divis = 0.75
@@ -875,7 +1001,6 @@ async def main():
                         await db.add_log_entry("console_clear", None, "Консоль очищена из-за таймаута 900 секунд")
 
                 pack_of_names = []
-
                 for i in range(int(step * divis)):
                     if baza730:
                         pack_of_names.append(baza730.pop(0))
@@ -901,8 +1026,8 @@ async def main():
                     await db.add_log_entry("parse_items_end", None,
                                            f"parse_items завершена, время выполнения: {end - start} секунд")
 
-                await asyncio.sleep(10 / sleep_div)
         except Exception as e:
+            print(traceback.format_exc())
             async with async_db.Storage() as db:
                 await db.add_log_entry("main_loop_exception", None,
                                        f"Ошибка в основном цикле: {traceback.format_exc()}")
